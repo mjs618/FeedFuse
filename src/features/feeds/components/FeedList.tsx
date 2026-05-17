@@ -77,7 +77,15 @@ export default function FeedList({
 }: FeedListProps) {
   const appCategories = useAppStore((state) => state.categories);
   const feeds = useAppStore((state) => state.feeds);
-  const articles = useAppStore((state) => state.articles);
+  const readLaterCount = useAppStore((state) =>
+    state.articles.reduce(
+      (count, article) => count + (article.isReadLater && !article.isArchived ? 1 : 0),
+      0,
+    ),
+  );
+  const archivedCount = useAppStore((state) =>
+    state.articles.reduce((count, article) => count + (article.isArchived ? 1 : 0), 0),
+  );
   const loadSnapshot = useAppStore((state) => state.loadSnapshot);
   const showFilteredByFeedId = useAppStore((state) => state.showFilteredByFeedId);
   const selectedView = useAppStore((state) => state.selectedView);
@@ -111,14 +119,6 @@ export default function FeedList({
         0,
       ),
     [feeds],
-  );
-  const readLaterCount = useMemo(
-    () => articles.filter((article) => article.isReadLater && !article.isArchived).length,
-    [articles],
-  );
-  const archivedCount = useMemo(
-    () => articles.filter((article) => article.isArchived).length,
-    [articles],
   );
   // Smart views derive counts from the same unread source data as the concrete feed rows.
   const smartViews = [
