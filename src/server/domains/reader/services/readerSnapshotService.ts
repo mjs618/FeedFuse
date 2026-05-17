@@ -1,5 +1,11 @@
 import type { Pool } from 'pg';
-import { AI_DIGEST_VIEW_ID, isRssSmartView } from '@/lib/reader/view';
+import {
+  AI_DIGEST_VIEW_ID,
+  ARCHIVED_VIEW_ID,
+  READ_LATER_VIEW_ID,
+  isRssSmartView,
+  shouldUseDefaultUnreadOnly,
+} from '@/lib/reader/view';
 import { getServerEnv } from '@/server/infra/env';
 import { buildImageProxyUrl, getOptionalImageProxySecret } from '@/server/integrations/media/imageProxyUrl';
 import { evaluateArticleBodyTranslationEligibility } from '@/server/integrations/ai/articleTranslationEligibility';
@@ -55,6 +61,10 @@ export function buildArticleFilter(input: {
 
   if (input.view === AI_DIGEST_VIEW_ID) {
     whereParts.push("feed_id in (select id from feeds where kind = 'ai_digest')");
+  } else if (input.view === READ_LATER_VIEW_ID) {
+    whereParts.push('is_read_later = true');
+  } else if (input.view === ARCHIVED_VIEW_ID) {
+    whereParts.push('is_archived = true');
   } else if (input.view === 'unread') {
     whereParts.push('is_read = false');
   } else if (input.view === 'starred') {
@@ -68,7 +78,11 @@ export function buildArticleFilter(input: {
     whereParts.push("feed_id in (select id from feeds where kind = 'rss')");
   }
 
-  if (input.unreadOnly) {
+  if (input.view !== ARCHIVED_VIEW_ID) {
+    whereParts.push('is_archived = false');
+  }
+
+  if (input.unreadOnly && shouldUseDefaultUnreadOnly(input.view)) {
     whereParts.push('is_read = false');
   }
 
@@ -77,6 +91,8 @@ export function buildArticleFilter(input: {
     input.view !== 'unread' &&
     input.view !== 'starred' &&
     input.view !== AI_DIGEST_VIEW_ID &&
+    input.view !== READ_LATER_VIEW_ID &&
+    input.view !== ARCHIVED_VIEW_ID &&
     !isRssSmartView(input.view);
   const visibleStatuses =
     isSpecificFeedView && input.includeFiltered
@@ -121,6 +137,10 @@ export interface ReaderSnapshotArticleItem {
   filteredBy: string[];
   isRead: boolean;
   isStarred: boolean;
+  isReadLater: boolean;
+  readLaterAt: string | null;
+  isArchived: boolean;
+  archivedAt: string | null;
   bodyTranslationEligible: boolean;
   bodyTranslationBlockedReason: string | null;
   aiSummarySession: {
@@ -290,6 +310,10 @@ async function queryArticleRows(
         articles.content_full_html as "contentFullHtml",
         articles.is_read as "isRead",
         articles.is_starred as "isStarred",
+        articles.is_read_later as "isReadLater",
+        articles.read_later_at as "readLaterAt",
+        articles.is_archived as "isArchived",
+        articles.archived_at as "archivedAt",
         ai_summary_session.id as "aiSummarySessionId",
         ai_summary_session.status as "aiSummarySessionStatus",
         ai_summary_session.draft_text as "aiSummarySessionDraftText",
