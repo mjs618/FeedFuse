@@ -398,7 +398,7 @@ export async function getReaderSnapshot(
   }>(`
     select feed_id as "feedId", count(*)::int as "unreadCount"
     from articles
-    where is_read = false and filter_status = any('{passed,error}'::text[])
+    where is_read = false and is_archived = false and filter_status = any('{passed,error}'::text[])
     group by feed_id
   `);
 

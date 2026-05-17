@@ -112,4 +112,22 @@ describe('readerSnapshotService', () => {
     expect(articleQuery).toContain('articles.is_archived as "isArchived"');
     expect(articleQuery).toContain('articles.archived_at as "archivedAt"');
   });
+
+  it('excludes archived articles from feed unread counts', async () => {
+    const queries: string[] = [];
+    const pool = {
+      query: async (sql: string) => {
+        queries.push(sql);
+        if (sql.includes('from categories')) return { rows: [] };
+        if (sql.includes('from feeds')) return { rows: [] };
+        if (sql.includes('select count(*)::int as "totalCount"')) return { rows: [{ totalCount: 0 }] };
+        return { rows: [] };
+      },
+    };
+
+    await getReaderSnapshot(pool as never, { view: 'all' });
+
+    const unreadCountQuery = queries.find((sql) => sql.includes('select feed_id as "feedId"'));
+    expect(unreadCountQuery).toContain('is_archived = false');
+  });
 });
