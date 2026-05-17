@@ -9,7 +9,9 @@ import { numericIdSchema } from '@/server/infra/http/idSchemas';
 import { getActiveAiSummarySessionByArticleId } from '@/server/domains/articles/repositories/articleAiSummaryRepo';
 import {
   getArticleById,
+  setArticleArchived,
   setArticleRead,
+  setArticleReadLater,
   setArticleStarred,
   type ArticleRow,
 } from '@/server/domains/articles/repositories/articlesRepo';
@@ -35,6 +37,8 @@ const paramsSchema = z.object({
 const patchBodySchema = z
   .object({
     isRead: z.boolean().optional(),
+    isReadLater: z.boolean().optional(),
+    isArchived: z.boolean().optional(),
     isStarred: z.boolean().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, {
@@ -114,20 +118,32 @@ function resolvePatchOperation(input: {
   articleId: string;
   isRead?: boolean;
   isStarred?: boolean;
+  isReadLater?: boolean;
+  isArchived?: boolean;
 }):
   | {
       actionKey: 'article.markRead' | 'article.toggleStar';
       context: Record<string, unknown>;
     }
   | null {
-  if (typeof input.isRead !== 'undefined' && typeof input.isStarred === 'undefined') {
+  if (
+    typeof input.isRead !== 'undefined' &&
+    typeof input.isStarred === 'undefined' &&
+    typeof input.isReadLater === 'undefined' &&
+    typeof input.isArchived === 'undefined'
+  ) {
     return {
       actionKey: 'article.markRead',
       context: { articleId: input.articleId },
     };
   }
 
-  if (typeof input.isStarred !== 'undefined' && typeof input.isRead === 'undefined') {
+  if (
+    typeof input.isStarred !== 'undefined' &&
+    typeof input.isRead === 'undefined' &&
+    typeof input.isReadLater === 'undefined' &&
+    typeof input.isArchived === 'undefined'
+  ) {
     return {
       actionKey: 'article.toggleStar',
       context: {
@@ -221,15 +237,23 @@ export async function PATCH(
     }
 
     const pool = getPool();
-    const { isRead, isStarred } = bodyParsed.data;
+    const { isRead, isReadLater, isArchived, isStarred } = bodyParsed.data;
     operation = resolvePatchOperation({
       articleId: paramsParsed.data.id,
       isRead,
+      isReadLater,
+      isArchived,
       isStarred,
     });
 
     if (typeof isRead !== 'undefined') {
       await setArticleRead(pool, paramsParsed.data.id, isRead);
+    }
+    if (typeof isReadLater !== 'undefined') {
+      await setArticleReadLater(pool, paramsParsed.data.id, isReadLater);
+    }
+    if (typeof isArchived !== 'undefined') {
+      await setArticleArchived(pool, paramsParsed.data.id, isArchived);
     }
     if (typeof isStarred !== 'undefined') {
       await setArticleStarred(pool, paramsParsed.data.id, isStarred);

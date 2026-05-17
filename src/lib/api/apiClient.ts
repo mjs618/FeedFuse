@@ -439,6 +439,10 @@ export interface ReaderSnapshotDto {
       isFiltered: boolean;
       filteredBy: string[];
       isRead: boolean;
+      isReadLater: boolean;
+      readLaterAt: string | null;
+      isArchived: boolean;
+      archivedAt: string | null;
       isStarred: boolean;
       bodyTranslationEligible?: boolean;
       bodyTranslationBlockedReason?: string | null;
@@ -783,7 +787,7 @@ export async function reorderCategories(
 
 export async function patchArticle(
   articleId: string,
-  input: { isRead?: boolean; isStarred?: boolean },
+  input: { isRead?: boolean; isReadLater?: boolean; isArchived?: boolean; isStarred?: boolean },
   options?: RequestApiOptions,
 ): Promise<{ updated: true }> {
   return requestApi(
@@ -841,6 +845,10 @@ export interface ArticleDto {
   filteredBy: string[];
   isRead: boolean;
   readAt: string | null;
+  isReadLater: boolean;
+  readLaterAt: string | null;
+  isArchived: boolean;
+  archivedAt: string | null;
   isStarred: boolean;
   starredAt: string | null;
   bodyTranslationEligible?: boolean;
@@ -1217,6 +1225,10 @@ export function mapSnapshotArticleItem(dto: ReaderSnapshotDto['articles']['items
     isFiltered: dto.isFiltered,
     filteredBy: dto.filteredBy,
     isRead: dto.isRead,
+    isReadLater: dto.isReadLater,
+    readLaterAt: dto.readLaterAt,
+    isArchived: dto.isArchived,
+    archivedAt: dto.archivedAt,
     isStarred: dto.isStarred,
     bodyTranslationEligible: dto.bodyTranslationEligible,
     bodyTranslationBlockedReason: dto.bodyTranslationBlockedReason,
@@ -1244,6 +1256,10 @@ export function mapArticleDto(dto: ArticleDto): Article {
     isFiltered: dto.isFiltered,
     filteredBy: dto.filteredBy,
     isRead: dto.isRead,
+    isReadLater: dto.isReadLater,
+    readLaterAt: dto.readLaterAt,
+    isArchived: dto.isArchived,
+    archivedAt: dto.archivedAt,
     isStarred: dto.isStarred,
     bodyTranslationEligible: dto.bodyTranslationEligible,
     bodyTranslationBlockedReason: dto.bodyTranslationBlockedReason,

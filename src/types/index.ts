@@ -53,6 +53,10 @@ export interface Article {
   isFiltered?: boolean;
   filteredBy?: string[];
   isRead: boolean;
+  isReadLater?: boolean;
+  readLaterAt?: string | null;
+  isArchived?: boolean;
+  archivedAt?: string | null;
   isStarred: boolean;
   bodyTranslationEligible?: boolean;
   bodyTranslationBlockedReason?: string | null;

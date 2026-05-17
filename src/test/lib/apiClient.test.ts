@@ -223,6 +223,33 @@ describe('mapSnapshotArticleItem', () => {
     expect(mapped.titleOriginal).toBe('Original title');
     expect(mapped.titleZh).toBe('译文标题');
   });
+  it('preserves read later and archive state from snapshot payload', () => {
+    const mapped = mapSnapshotArticleItem({
+      id: 'article-3',
+      feedId: 'feed-1',
+      title: 'Saved article',
+      summary: 'Summary',
+      author: 'Author',
+      publishedAt: '2026-01-01T00:00:00.000Z',
+      link: 'https://example.com/article-3',
+      isRead: false,
+      isStarred: false,
+      isReadLater: true,
+      readLaterAt: '2026-05-01T00:00:00.000Z',
+      isArchived: true,
+      archivedAt: '2026-05-02T00:00:00.000Z',
+    } as ReaderSnapshotDto['articles']['items'][number] & {
+      isReadLater: boolean;
+      readLaterAt: string | null;
+      isArchived: boolean;
+      archivedAt: string | null;
+    });
+
+    expect(mapped.isReadLater).toBe(true);
+    expect(mapped.readLaterAt).toBe('2026-05-01T00:00:00.000Z');
+    expect(mapped.isArchived).toBe(true);
+    expect(mapped.archivedAt).toBe('2026-05-02T00:00:00.000Z');
+  });
 });
 
 it('mapArticleDto prefers contentFullHtml', () => {
@@ -255,6 +282,54 @@ it('mapArticleDto prefers contentFullHtml', () => {
     starredAt: null,
   });
   expect(mapped.content).toContain('full');
+});
+
+it('mapArticleDto preserves read later and archive state', () => {
+  const mapped = mapArticleDto({
+    id: 'a',
+    feedId: 'f',
+    dedupeKey: 'k',
+    title: 't',
+    titleOriginal: 't',
+    titleZh: null,
+    link: 'https://example.com',
+    author: null,
+    publishedAt: null,
+    contentHtml: '<p>rss</p>',
+    contentFullHtml: null,
+    contentFullFetchedAt: null,
+    contentFullError: null,
+    contentFullSourceUrl: null,
+    aiSummary: null,
+    aiSummaryModel: null,
+    aiSummarizedAt: null,
+    aiTranslationBilingualHtml: null,
+    aiTranslationZhHtml: null,
+    aiTranslationModel: null,
+    aiTranslatedAt: null,
+    summary: null,
+    filterStatus: 'passed',
+    isFiltered: false,
+    filteredBy: [],
+    isRead: false,
+    readAt: null,
+    isStarred: false,
+    starredAt: null,
+    isReadLater: true,
+    readLaterAt: '2026-05-01T00:00:00.000Z',
+    isArchived: true,
+    archivedAt: '2026-05-02T00:00:00.000Z',
+  } as Parameters<typeof mapArticleDto>[0] & {
+    isReadLater: boolean;
+    readLaterAt: string | null;
+    isArchived: boolean;
+    archivedAt: string | null;
+  });
+
+  expect(mapped.isReadLater).toBe(true);
+  expect(mapped.readLaterAt).toBe('2026-05-01T00:00:00.000Z');
+  expect(mapped.isArchived).toBe(true);
+  expect(mapped.archivedAt).toBe('2026-05-02T00:00:00.000Z');
 });
 
 it('mapArticleDto keeps ai summary rawErrorMessage', () => {

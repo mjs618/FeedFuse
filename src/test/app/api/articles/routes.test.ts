@@ -5,6 +5,8 @@ const pool = { query: poolQueryMock };
 
 const getArticleByIdMock = vi.fn();
 const setArticleReadMock = vi.fn();
+const setArticleReadLaterMock = vi.fn();
+const setArticleArchivedMock = vi.fn();
 const setArticleStarredMock = vi.fn();
 const markAllReadMock = vi.fn();
 const getFeedFullTextOnOpenEnabledMock = vi.fn();
@@ -57,30 +59,40 @@ vi.mock('@/server/infra/db/pool', () => ({
 vi.mock('@/server/domains/articles/repositories/articlesRepo', () => ({
   getArticleById: (...args: unknown[]) => getArticleByIdMock(...args),
   setArticleRead: (...args: unknown[]) => setArticleReadMock(...args),
+  setArticleReadLater: (...args: unknown[]) => setArticleReadLaterMock(...args),
+  setArticleArchived: (...args: unknown[]) => setArticleArchivedMock(...args),
   setArticleStarred: (...args: unknown[]) => setArticleStarredMock(...args),
   markAllRead: (...args: unknown[]) => markAllReadMock(...args),
 }));
 vi.mock('@/server/domains/articles/repositories/articlesRepo', () => ({
   getArticleById: (...args: unknown[]) => getArticleByIdMock(...args),
   setArticleRead: (...args: unknown[]) => setArticleReadMock(...args),
+  setArticleReadLater: (...args: unknown[]) => setArticleReadLaterMock(...args),
+  setArticleArchived: (...args: unknown[]) => setArticleArchivedMock(...args),
   setArticleStarred: (...args: unknown[]) => setArticleStarredMock(...args),
   markAllRead: (...args: unknown[]) => markAllReadMock(...args),
 }));
 vi.mock('@/server/domains/articles/repositories/articlesRepo', () => ({
   getArticleById: (...args: unknown[]) => getArticleByIdMock(...args),
   setArticleRead: (...args: unknown[]) => setArticleReadMock(...args),
+  setArticleReadLater: (...args: unknown[]) => setArticleReadLaterMock(...args),
+  setArticleArchived: (...args: unknown[]) => setArticleArchivedMock(...args),
   setArticleStarred: (...args: unknown[]) => setArticleStarredMock(...args),
   markAllRead: (...args: unknown[]) => markAllReadMock(...args),
 }));
 vi.mock('@/server/domains/articles/repositories/articlesRepo', () => ({
   getArticleById: (...args: unknown[]) => getArticleByIdMock(...args),
   setArticleRead: (...args: unknown[]) => setArticleReadMock(...args),
+  setArticleReadLater: (...args: unknown[]) => setArticleReadLaterMock(...args),
+  setArticleArchived: (...args: unknown[]) => setArticleArchivedMock(...args),
   setArticleStarred: (...args: unknown[]) => setArticleStarredMock(...args),
   markAllRead: (...args: unknown[]) => markAllReadMock(...args),
 }));
 vi.mock('@/server/domains/articles/repositories/articlesRepo', () => ({
   getArticleById: (...args: unknown[]) => getArticleByIdMock(...args),
   setArticleRead: (...args: unknown[]) => setArticleReadMock(...args),
+  setArticleReadLater: (...args: unknown[]) => setArticleReadLaterMock(...args),
+  setArticleArchived: (...args: unknown[]) => setArticleArchivedMock(...args),
   setArticleStarred: (...args: unknown[]) => setArticleStarredMock(...args),
   markAllRead: (...args: unknown[]) => markAllReadMock(...args),
 }));
@@ -264,6 +276,8 @@ describe('/api/articles', () => {
     vi.unstubAllEnvs();
     getArticleByIdMock.mockReset();
     setArticleReadMock.mockReset();
+    setArticleReadLaterMock.mockReset();
+    setArticleArchivedMock.mockReset();
     setArticleStarredMock.mockReset();
     markAllReadMock.mockReset();
     getFeedFullTextOnOpenEnabledMock.mockReset();
@@ -878,6 +892,43 @@ describe('/api/articles', () => {
     const json = await res.json();
     expect(json.ok).toBe(false);
     expect(json.error.code).toBe('validation_error');
+  });
+
+  it('PATCH updates read later state', async () => {
+    setArticleReadLaterMock.mockResolvedValue(true);
+
+    const mod = await import('../../../../app/api/articles/[id]/route');
+    const res = await mod.PATCH(
+      new Request(`http://localhost/api/articles/${articleId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ isReadLater: true }),
+      }),
+      { params: Promise.resolve({ id: articleId }) },
+    );
+    const json = await res.json();
+
+    expect(json.ok).toBe(true);
+    expect(setArticleReadLaterMock).toHaveBeenCalledWith(pool, articleId, true);
+  });
+
+  it('PATCH updates archive state without marking read', async () => {
+    setArticleArchivedMock.mockResolvedValue(true);
+
+    const mod = await import('../../../../app/api/articles/[id]/route');
+    const res = await mod.PATCH(
+      new Request(`http://localhost/api/articles/${articleId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ isArchived: true }),
+      }),
+      { params: Promise.resolve({ id: articleId }) },
+    );
+    const json = await res.json();
+
+    expect(json.ok).toBe(true);
+    expect(setArticleArchivedMock).toHaveBeenCalledWith(pool, articleId, true);
+    expect(setArticleReadMock).not.toHaveBeenCalled();
   });
 
   it('PATCH writes article.markRead success log through the shared helper', async () => {
