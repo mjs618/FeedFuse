@@ -478,6 +478,74 @@ describe('appStore api integration', () => {
     );
   });
 
+  it('does not let an older failed read toggle clobber newer local article state', async () => {
+    const firstPatch = createDeferred<Response>();
+    const patchBodies: Record<string, unknown>[] = [];
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/articles/3001') && method === 'PATCH') {
+        patchBodies.push(await getFetchCallJsonBody(input, init));
+        if (patchBodies.length === 1) {
+          return firstPatch.promise;
+        }
+        return jsonResponse({ ok: true, data: { updated: true } });
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    useAppStore.setState({
+      feeds: [createSnapshotFeed('feed-1', 'Feed One', 1)],
+      articles: [createSnapshotArticle('3001', 'feed-1', 'Original Article')],
+      articleDetailCache: {},
+    });
+
+    useAppStore.getState().toggleReadState('3001');
+    expect(useAppStore.getState().articles[0]).toMatchObject({ isRead: true });
+    expect(useAppStore.getState().feeds[0].unreadCount).toBe(0);
+
+    useAppStore.getState().toggleReadState('3001');
+    const newerCachedArticle = {
+      ...createSnapshotArticle('3001', 'feed-1', 'Refreshed Article'),
+      content: '<p>newer detail</p>',
+      isRead: false,
+    };
+    useAppStore.setState({
+      articleDetailCache: {
+        3001: newerCachedArticle,
+      },
+    });
+    expect(useAppStore.getState().articles[0]).toMatchObject({ isRead: false });
+    expect(useAppStore.getState().feeds[0].unreadCount).toBe(1);
+
+    firstPatch.resolve(
+      jsonResponse(
+        {
+          ok: false,
+          error: {
+            code: 'internal_error',
+            message: '更新失败',
+          },
+        },
+        { status: 500 },
+      ),
+    );
+    await flushPromises();
+    await flushPromises();
+
+    expect(patchBodies).toEqual([{ isRead: true }, { isRead: false }]);
+    expect(useAppStore.getState().articles[0]).toMatchObject({ isRead: false });
+    expect(useAppStore.getState().feeds[0].unreadCount).toBe(1);
+    expect(useAppStore.getState().articleDetailCache['3001']).toMatchObject({
+      title: 'Refreshed Article',
+      content: '<p>newer detail</p>',
+      isRead: false,
+    });
+  });
+
   it('archives the selected article, advances selection, persists it, and emits undo toast action', async () => {
     const patchBodies: Record<string, unknown>[] = [];
 

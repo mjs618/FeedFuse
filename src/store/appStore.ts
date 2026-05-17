@@ -340,6 +340,19 @@ function updateArticleInVisibleCollections(
   };
 }
 
+function shallowEqualRecord<T extends Record<string, unknown>>(
+  left: T | undefined,
+  right: T | undefined,
+): boolean {
+  if (!left || !right) return left === right;
+
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) return false;
+
+  return leftKeys.every((key) => left[key] === right[key]);
+}
+
 export function getSelectedArticleFromState(
   state: Pick<AppState, 'selectedArticleId' | 'articles' | 'articleDetailCache'>,
 ): Article | null {
@@ -941,6 +954,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     const unreadCountDelta = nextValue ? -1 : 1;
     const previousCachedArticle = stateBeforeToggle.articleDetailCache[articleId];
     const previousFeed = stateBeforeToggle.feeds.find((feed) => feed.id === article.feedId);
+    const optimisticArticle = { ...article, isRead: nextValue };
+    const optimisticCachedArticle = previousCachedArticle
+      ? { ...previousCachedArticle, isRead: nextValue }
+      : undefined;
+    const optimisticFeed = previousFeed
+      ? { ...previousFeed, unreadCount: Math.max(0, previousFeed.unreadCount + unreadCountDelta) }
+      : undefined;
 
     set((state) => ({
       articles: state.articles.map((item) =>
@@ -970,26 +990,37 @@ export const useAppStore = create<AppState>((set, get) => ({
           context: { read: nextValue },
           err,
         });
-        set((state) => ({
-          articles: state.articles.map((item) =>
-            item.id === articleId ? article : item,
-          ),
-          articleDetailCache: (() => {
-            if (previousCachedArticle) {
-              return {
-                ...state.articleDetailCache,
-                [articleId]: previousCachedArticle,
-              };
-            }
+        set((state) => {
+          const currentVisibleArticle = state.articles.find((item) => item.id === articleId);
+          const currentCachedArticle = state.articleDetailCache[articleId];
+          const currentFeed = state.feeds.find((feed) => feed.id === article.feedId);
+          const shouldRollbackVisibleArticle = shallowEqualRecord(
+            currentVisibleArticle,
+            optimisticArticle,
+          );
+          const shouldRollbackCachedArticle =
+            previousCachedArticle !== undefined &&
+            shallowEqualRecord(currentCachedArticle, optimisticCachedArticle);
+          const shouldRollbackFeed =
+            (shouldRollbackVisibleArticle || shouldRollbackCachedArticle) &&
+            previousFeed !== undefined &&
+            shallowEqualRecord(currentFeed, optimisticFeed);
 
-            const remainingCache = { ...state.articleDetailCache };
-            delete remainingCache[articleId];
-            return remainingCache;
-          })(),
-          feeds: state.feeds.map((feed) =>
-            feed.id === article.feedId && previousFeed ? previousFeed : feed,
-          ),
-        }));
+          return {
+            articles: shouldRollbackVisibleArticle
+              ? state.articles.map((item) => (item.id === articleId ? article : item))
+              : state.articles,
+            articleDetailCache: shouldRollbackCachedArticle
+              ? {
+                  ...state.articleDetailCache,
+                  [articleId]: previousCachedArticle,
+                }
+              : state.articleDetailCache,
+            feeds: shouldRollbackFeed
+              ? state.feeds.map((feed) => (feed.id === article.feedId ? previousFeed : feed))
+              : state.feeds,
+          };
+        });
       });
   },
 
