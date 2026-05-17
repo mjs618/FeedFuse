@@ -525,13 +525,12 @@ function sortArticlesByPublishedAtDesc(articles: Article[]): Article[] {
 
 function findNextVisibleArticleId(articles: Article[], archivedArticleId: string): string | null {
   const currentIndex = articles.findIndex((article) => article.id === archivedArticleId);
-  if (currentIndex < 0 || articles.length <= 1) {
+  if (currentIndex < 0 || currentIndex >= articles.length - 1) {
     return null;
   }
 
-  for (let offset = 1; offset < articles.length; offset += 1) {
-    const article = articles[(currentIndex + offset) % articles.length];
-    if (article.id !== archivedArticleId && !article.isArchived) {
+  for (const article of articles.slice(currentIndex + 1)) {
+    if (!article.isArchived) {
       return article.id;
     }
   }

@@ -324,7 +324,10 @@ describe('appStore api integration', () => {
           ok: true,
           data: createSnapshotPage({
             items: [
-              createSnapshotArticle('3001', 'feed-1', 'Archive Target'),
+              {
+                ...createSnapshotArticle('3001', 'feed-1', 'Archive Target'),
+                isRead: false,
+              },
               createSnapshotArticle('3002', 'feed-1', 'Next Article'),
             ],
           }),
@@ -345,7 +348,7 @@ describe('appStore api integration', () => {
     useAppStore.getState().archiveArticle('3001');
 
     const archived = useAppStore.getState().articles.find((item) => item.id === '3001');
-    expect(archived).toMatchObject({ isArchived: true });
+    expect(archived).toMatchObject({ isArchived: true, isRead: false });
     expect(archived?.archivedAt).toEqual(expect.any(String));
     expect(useAppStore.getState().selectedArticleId).toBe('3002');
 
@@ -364,6 +367,38 @@ describe('appStore api integration', () => {
       actionKey: 'article.archive',
       context: { archived: true },
     });
+  });
+
+  it('clears selection when archiving the last visible non-archived article', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/reader/snapshot') && method === 'GET') {
+        return jsonResponse({
+          ok: true,
+          data: createSnapshotPage({
+            items: [
+              createSnapshotArticle('2999', 'feed-1', 'Earlier Article'),
+              createSnapshotArticle('3001', 'feed-1', 'Last Article'),
+            ],
+          }),
+        });
+      }
+
+      if (url.includes('/api/articles/3001') && method === 'PATCH') {
+        return jsonResponse({ ok: true, data: { updated: true } });
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    await useAppStore.getState().loadSnapshot({ view: 'all' });
+    useAppStore.setState({ selectedArticleId: '3001' });
+
+    useAppStore.getState().archiveArticle('3001');
+
+    expect(useAppStore.getState().selectedArticleId).toBeNull();
   });
 
   it('unarchives an article, clears archivedAt, persists it, and emits success operation context', async () => {
