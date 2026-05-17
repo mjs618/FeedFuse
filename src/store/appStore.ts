@@ -132,6 +132,7 @@ interface AppState {
   loadMoreSnapshot: () => Promise<void>;
   toggleSidebar: () => void;
   markAsRead: (articleId: string) => void;
+  toggleReadState: (articleId: string) => void;
   markAllAsRead: (feedId?: string) => void;
   toggleReadLater: (articleId: string) => void;
   archiveArticle: (articleId: string) => void;
@@ -924,6 +925,45 @@ export const useAppStore = create<AppState>((set, get) => ({
       })
       .catch((err) => {
         runImmediateFailure({ actionKey: 'article.markRead', err });
+      });
+  },
+
+  toggleReadState: (articleId) => {
+    const article = getArticleFromCollections(articleId, get().articles, get().articleDetailCache);
+    if (!article) return;
+
+    const nextValue = !article.isRead;
+    const unreadCountDelta = nextValue ? -1 : 1;
+
+    set((state) => ({
+      articles: state.articles.map((item) =>
+        item.id === articleId ? { ...item, isRead: nextValue } : item,
+      ),
+      articleDetailCache: updateCachedArticle(state.articleDetailCache, articleId, (cachedArticle) => ({
+        ...cachedArticle,
+        isRead: nextValue,
+      })),
+      feeds: state.feeds.map((feed) =>
+        feed.id === article.feedId
+          ? { ...feed, unreadCount: Math.max(0, feed.unreadCount + unreadCountDelta) }
+          : feed,
+      ),
+    }));
+
+    void patchArticle(articleId, { isRead: nextValue }, { notifyOnError: false })
+      .then(() => {
+        runImmediateSuccess({
+          actionKey: 'article.toggleRead',
+          context: { read: nextValue },
+        });
+      })
+      .catch((err) => {
+        runImmediateFailure({
+          actionKey: 'article.toggleRead',
+          context: { read: nextValue },
+          err,
+        });
+        void loadCurrentSnapshotSilently(get);
       });
   },
 

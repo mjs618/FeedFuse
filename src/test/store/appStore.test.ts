@@ -367,6 +367,56 @@ describe('appStore api integration', () => {
     });
   });
 
+  it('toggles article read state both ways optimistically and persists the next value', async () => {
+    const patchBodies: Record<string, unknown>[] = [];
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/reader/snapshot') && method === 'GET') {
+        return jsonResponse({
+          ok: true,
+          data: createSnapshotPage({
+            feeds: [createSnapshotFeed('feed-1', 'Feed One', 1)],
+            items: [createSnapshotArticle('3001', 'feed-1', 'Read Toggle Target')],
+          }),
+        });
+      }
+
+      if (url.includes('/api/articles/3001') && method === 'PATCH') {
+        patchBodies.push(await getFetchCallJsonBody(input, init));
+        return jsonResponse({ ok: true, data: { updated: true } });
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    await useAppStore.getState().loadSnapshot({ view: 'all' });
+
+    useAppStore.getState().toggleReadState('3001');
+    expect(useAppStore.getState().articles[0]).toMatchObject({ isRead: true });
+    expect(useAppStore.getState().feeds[0].unreadCount).toBe(0);
+
+    await flushPromises();
+    expect(patchBodies[0]).toEqual({ isRead: true });
+
+    useAppStore.getState().toggleReadState('3001');
+    expect(useAppStore.getState().articles[0]).toMatchObject({ isRead: false });
+    expect(useAppStore.getState().feeds[0].unreadCount).toBe(1);
+
+    await flushPromises();
+    expect(patchBodies[1]).toEqual({ isRead: false });
+    expect(runImmediateSuccessMock).toHaveBeenCalledWith({
+      actionKey: 'article.toggleRead',
+      context: { read: true },
+    });
+    expect(runImmediateSuccessMock).toHaveBeenCalledWith({
+      actionKey: 'article.toggleRead',
+      context: { read: false },
+    });
+  });
+
   it('archives the selected article, advances selection, persists it, and emits undo toast action', async () => {
     const patchBodies: Record<string, unknown>[] = [];
 

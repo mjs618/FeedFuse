@@ -19,6 +19,7 @@ export type UserOperationActionKey =
   | 'category.delete'
   | 'category.reorder'
   | 'article.markRead'
+  | 'article.toggleRead'
   | 'article.markAllRead'
   | 'article.toggleStar'
   | 'article.toggleReadLater'
@@ -162,6 +163,19 @@ const catalog: Record<UserOperationActionKey, UserOperationCatalogEntry> = {
     successMessage: () => '已标记为已读',
     errorPrefix: () => '标记为已读失败',
     // Reading itself already implies progress; avoid firing a toast on every open.
+    toastVisibility: HIDE_SUCCESS_TOAST,
+  },
+  'article.toggleRead': {
+    mode: 'immediate',
+    category: 'article',
+    successMessage: (context) => {
+      const read = context?.read === true;
+      return read ? '已标为已读' : '已标为未读';
+    },
+    errorPrefix: (context) => {
+      const read = context?.read === true;
+      return read ? '标为已读失败' : '标为未读失败';
+    },
     toastVisibility: HIDE_SUCCESS_TOAST,
   },
   'article.markAllRead': {

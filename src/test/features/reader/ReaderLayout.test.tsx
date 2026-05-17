@@ -64,6 +64,7 @@ const initialAppStoreActions = {
   toggleReadLater: useAppStore.getState().toggleReadLater,
   archiveArticle: useAppStore.getState().archiveArticle,
   markAsRead: useAppStore.getState().markAsRead,
+  toggleReadState: useAppStore.getState().toggleReadState,
 };
 
 function resetSettingsStore() {
@@ -544,6 +545,7 @@ describe('ReaderLayout', () => {
     const toggleReadLater = vi.fn();
     const archiveArticle = vi.fn();
     const markAsRead = vi.fn();
+    const toggleReadState = vi.fn();
     useAppStore.setState({
       articles: [createReaderArticle({ id: 'article-1' })],
       selectedView: 'all',
@@ -552,6 +554,7 @@ describe('ReaderLayout', () => {
       toggleReadLater,
       archiveArticle,
       markAsRead,
+      toggleReadState,
     });
 
     await renderWithNotificationsSettled();
@@ -564,7 +567,8 @@ describe('ReaderLayout', () => {
     expect(toggleStar).toHaveBeenCalledWith('article-1');
     expect(toggleReadLater).toHaveBeenCalledWith('article-1');
     expect(archiveArticle).toHaveBeenCalledWith('article-1');
-    expect(markAsRead).toHaveBeenCalledWith('article-1');
+    expect(toggleReadState).toHaveBeenCalledWith('article-1');
+    expect(markAsRead).not.toHaveBeenCalled();
   });
 
   it('opens and closes shortcut help with ? while preserving editable targets', async () => {

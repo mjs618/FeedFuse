@@ -16,7 +16,7 @@ const shortcutRows = [
   { keys: 'S', action: '收藏' },
   { keys: 'L', action: '稍后读' },
   { keys: 'E', action: '归档' },
-  { keys: 'M', action: '标为已读' },
+  { keys: 'M', action: '切换已读 / 未读' },
   { keys: 'Ctrl / Cmd + F', action: '搜索' },
   { keys: 'Esc', action: '关闭 / 返回' },
 ];

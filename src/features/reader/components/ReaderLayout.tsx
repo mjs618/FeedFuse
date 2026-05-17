@@ -114,7 +114,7 @@ export default function ReaderLayout({ renderedAt, initialSelectedView }: Reader
   const toggleStar = useAppStore((state) => state.toggleStar);
   const toggleReadLater = useAppStore((state) => state.toggleReadLater);
   const archiveArticle = useAppStore((state) => state.archiveArticle);
-  const markAsRead = useAppStore((state) => state.markAsRead);
+  const toggleReadState = useAppStore((state) => state.toggleReadState);
   const general = useSettingsStore((state) => state.persistedSettings.general);
   const updateReaderLayoutSettings = useSettingsStore((state) => state.updateReaderLayoutSettings);
   const selectedArticleTitle = useAppStore(
@@ -382,7 +382,7 @@ export default function ReaderLayout({ renderedAt, initialSelectedView }: Reader
 
       if (key === 'm') {
         event.preventDefault();
-        markAsRead(selectedArticleId);
+        toggleReadState(selectedArticleId);
       }
     };
 
@@ -394,7 +394,6 @@ export default function ReaderLayout({ renderedAt, initialSelectedView }: Reader
     archiveArticle,
     articles,
     feeds,
-    markAsRead,
     selectedArticleId,
     selectedView,
     setSelectedArticle,
@@ -404,6 +403,7 @@ export default function ReaderLayout({ renderedAt, initialSelectedView }: Reader
     shortcutHelpOpen,
     showUnreadOnly,
     toggleReadLater,
+    toggleReadState,
     toggleStar,
   ]);
 
