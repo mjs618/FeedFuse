@@ -546,6 +546,65 @@ describe('appStore api integration', () => {
     });
   });
 
+  it('restores the original state when rapid read toggles both fail in order', async () => {
+    const firstPatch = createDeferred<Response>();
+    const secondPatch = createDeferred<Response>();
+    const patchBodies: Record<string, unknown>[] = [];
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/articles/3001') && method === 'PATCH') {
+        patchBodies.push(await getFetchCallJsonBody(input, init));
+        return patchBodies.length === 1 ? firstPatch.promise : secondPatch.promise;
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    useAppStore.setState({
+      feeds: [createSnapshotFeed('feed-1', 'Feed One', 1)],
+      articles: [createSnapshotArticle('3001', 'feed-1', 'Original Article')],
+      articleDetailCache: {},
+    });
+
+    useAppStore.getState().toggleReadState('3001');
+    expect(useAppStore.getState().articles[0]).toMatchObject({ isRead: true });
+    expect(useAppStore.getState().feeds[0].unreadCount).toBe(0);
+
+    useAppStore.getState().toggleReadState('3001');
+    expect(useAppStore.getState().articles[0]).toMatchObject({ isRead: false });
+    expect(useAppStore.getState().feeds[0].unreadCount).toBe(1);
+
+    const failureResponse = (message: string) =>
+      jsonResponse(
+        {
+          ok: false,
+          error: {
+            code: 'internal_error',
+            message,
+          },
+        },
+        { status: 500 },
+      );
+
+    firstPatch.resolve(failureResponse('first failed'));
+    await flushPromises();
+    await flushPromises();
+
+    expect(useAppStore.getState().articles[0]).toMatchObject({ isRead: false });
+    expect(useAppStore.getState().feeds[0].unreadCount).toBe(1);
+
+    secondPatch.resolve(failureResponse('second failed'));
+    await flushPromises();
+    await flushPromises();
+
+    expect(patchBodies).toEqual([{ isRead: true }, { isRead: false }]);
+    expect(useAppStore.getState().articles[0]).toMatchObject({ isRead: false });
+    expect(useAppStore.getState().feeds[0].unreadCount).toBe(1);
+  });
+
   it('archives the selected article, advances selection, persists it, and emits undo toast action', async () => {
     const patchBodies: Record<string, unknown>[] = [];
 

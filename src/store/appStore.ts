@@ -340,17 +340,133 @@ function updateArticleInVisibleCollections(
   };
 }
 
-function shallowEqualRecord<T extends Record<string, unknown>>(
-  left: T | undefined,
-  right: T | undefined,
-): boolean {
+function shallowEqualRecord(left: object | undefined, right: object | undefined): boolean {
   if (!left || !right) return left === right;
 
   const leftKeys = Object.keys(left);
   const rightKeys = Object.keys(right);
   if (leftKeys.length !== rightKeys.length) return false;
 
-  return leftKeys.every((key) => left[key] === right[key]);
+  const leftRecord = left as Record<string, unknown>;
+  const rightRecord = right as Record<string, unknown>;
+  return leftKeys.every((key) => leftRecord[key] === rightRecord[key]);
+}
+
+type PendingReadToggleOperation = {
+  id: number;
+  nextValue: boolean;
+  status: 'pending' | 'success';
+};
+
+type PendingReadToggleMutation = {
+  baselineArticle: Article;
+  baselineCachedArticle?: Article;
+  baselineFeed?: Feed;
+  operations: PendingReadToggleOperation[];
+};
+
+let readToggleOperationId = 0;
+const pendingReadToggleMutations = new Map<string, PendingReadToggleMutation>();
+
+function withArticleReadState(article: Article, isRead: boolean): Article {
+  return { ...article, isRead };
+}
+
+function withFeedReadProjection(feed: Feed | undefined, baselineRead: boolean, nextRead: boolean) {
+  if (!feed) return undefined;
+
+  const unreadCountDelta = baselineRead === nextRead ? 0 : nextRead ? -1 : 1;
+  return {
+    ...feed,
+    unreadCount: Math.max(0, feed.unreadCount + unreadCountDelta),
+  };
+}
+
+function getProjectedReadValue(pending: PendingReadToggleMutation): boolean {
+  return pending.operations.at(-1)?.nextValue ?? pending.baselineArticle.isRead;
+}
+
+function getReadToggleProjection(pending: PendingReadToggleMutation) {
+  const nextRead = getProjectedReadValue(pending);
+
+  return {
+    article: withArticleReadState(pending.baselineArticle, nextRead),
+    cachedArticle: pending.baselineCachedArticle
+      ? withArticleReadState(pending.baselineCachedArticle, nextRead)
+      : undefined,
+    feed: withFeedReadProjection(
+      pending.baselineFeed,
+      pending.baselineArticle.isRead,
+      nextRead,
+    ),
+  };
+}
+
+function advanceReadToggleBaseline(pending: PendingReadToggleMutation): void {
+  while (pending.operations[0]?.status === 'success') {
+    const operation = pending.operations.shift();
+    if (!operation) return;
+
+    const baselineRead = pending.baselineArticle.isRead;
+    pending.baselineArticle = withArticleReadState(
+      pending.baselineArticle,
+      operation.nextValue,
+    );
+    if (pending.baselineCachedArticle) {
+      pending.baselineCachedArticle = withArticleReadState(
+        pending.baselineCachedArticle,
+        operation.nextValue,
+      );
+    }
+    pending.baselineFeed = withFeedReadProjection(
+      pending.baselineFeed,
+      baselineRead,
+      operation.nextValue,
+    );
+  }
+}
+
+function applyReadToggleProjection(
+  state: AppState,
+  articleId: string,
+  pending: PendingReadToggleMutation,
+  expectedProjection?: ReturnType<typeof getReadToggleProjection>,
+) {
+  const nextProjection = getReadToggleProjection(pending);
+  const currentVisibleArticle = state.articles.find((item) => item.id === articleId);
+  const currentCachedArticle = state.articleDetailCache[articleId];
+  const currentFeed = state.feeds.find((feed) => feed.id === pending.baselineArticle.feedId);
+  const canUpdateVisibleArticle =
+    expectedProjection === undefined ||
+    shallowEqualRecord(currentVisibleArticle, expectedProjection.article);
+  const canUpdateCachedArticle =
+    pending.baselineCachedArticle !== undefined &&
+    (expectedProjection === undefined ||
+      shallowEqualRecord(currentCachedArticle, expectedProjection.cachedArticle));
+  const canUpdateFeed =
+    pending.baselineFeed !== undefined &&
+    (canUpdateVisibleArticle || canUpdateCachedArticle) &&
+    (expectedProjection === undefined ||
+      shallowEqualRecord(currentFeed, expectedProjection.feed));
+
+  return {
+    articles: canUpdateVisibleArticle
+      ? state.articles.map((item) => (item.id === articleId ? nextProjection.article : item))
+      : state.articles,
+    articleDetailCache: canUpdateCachedArticle
+      ? {
+          ...state.articleDetailCache,
+          [articleId]: nextProjection.cachedArticle as Article,
+        }
+      : state.articleDetailCache,
+    feeds: canUpdateFeed
+      ? state.feeds.map((feed) =>
+          feed.id === pending.baselineArticle.feedId && nextProjection.feed
+            ? nextProjection.feed
+            : feed,
+        )
+      : state.feeds,
+  };
 }
 
 export function getSelectedArticleFromState(
@@ -951,31 +1067,23 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!article) return;
 
     const nextValue = !article.isRead;
-    const unreadCountDelta = nextValue ? -1 : 1;
-    const previousCachedArticle = stateBeforeToggle.articleDetailCache[articleId];
-    const previousFeed = stateBeforeToggle.feeds.find((feed) => feed.id === article.feedId);
-    const optimisticArticle = { ...article, isRead: nextValue };
-    const optimisticCachedArticle = previousCachedArticle
-      ? { ...previousCachedArticle, isRead: nextValue }
-      : undefined;
-    const optimisticFeed = previousFeed
-      ? { ...previousFeed, unreadCount: Math.max(0, previousFeed.unreadCount + unreadCountDelta) }
-      : undefined;
+    const operation: PendingReadToggleOperation = {
+      id: (readToggleOperationId += 1),
+      nextValue,
+      status: 'pending',
+    };
+    const pending =
+      pendingReadToggleMutations.get(articleId) ??
+      {
+        baselineArticle: article,
+        baselineCachedArticle: stateBeforeToggle.articleDetailCache[articleId],
+        baselineFeed: stateBeforeToggle.feeds.find((feed) => feed.id === article.feedId),
+        operations: [],
+      };
+    pending.operations.push(operation);
+    pendingReadToggleMutations.set(articleId, pending);
 
-    set((state) => ({
-      articles: state.articles.map((item) =>
-        item.id === articleId ? { ...item, isRead: nextValue } : item,
-      ),
-      articleDetailCache: updateCachedArticle(state.articleDetailCache, articleId, (cachedArticle) => ({
-        ...cachedArticle,
-        isRead: nextValue,
-      })),
-      feeds: state.feeds.map((feed) =>
-        feed.id === article.feedId
-          ? { ...feed, unreadCount: Math.max(0, feed.unreadCount + unreadCountDelta) }
-          : feed,
-      ),
-    }));
+    set((state) => applyReadToggleProjection(state, articleId, pending));
 
     void patchArticle(articleId, { isRead: nextValue }, { notifyOnError: false })
       .then(() => {
@@ -983,6 +1091,21 @@ export const useAppStore = create<AppState>((set, get) => ({
           actionKey: 'article.toggleRead',
           context: { read: nextValue },
         });
+        const latestPending = pendingReadToggleMutations.get(articleId);
+        const settledOperation = latestPending?.operations.find((item) => item.id === operation.id);
+        if (!latestPending || !settledOperation) return;
+
+        settledOperation.status = 'success';
+        const expectedProjection = getReadToggleProjection(latestPending);
+        advanceReadToggleBaseline(latestPending);
+        if (latestPending.operations.length === 0) {
+          pendingReadToggleMutations.delete(articleId);
+          return;
+        }
+
+        set((state) =>
+          applyReadToggleProjection(state, articleId, latestPending, expectedProjection),
+        );
       })
       .catch((err) => {
         runImmediateFailure({
@@ -990,37 +1113,23 @@ export const useAppStore = create<AppState>((set, get) => ({
           context: { read: nextValue },
           err,
         });
-        set((state) => {
-          const currentVisibleArticle = state.articles.find((item) => item.id === articleId);
-          const currentCachedArticle = state.articleDetailCache[articleId];
-          const currentFeed = state.feeds.find((feed) => feed.id === article.feedId);
-          const shouldRollbackVisibleArticle = shallowEqualRecord(
-            currentVisibleArticle,
-            optimisticArticle,
-          );
-          const shouldRollbackCachedArticle =
-            previousCachedArticle !== undefined &&
-            shallowEqualRecord(currentCachedArticle, optimisticCachedArticle);
-          const shouldRollbackFeed =
-            (shouldRollbackVisibleArticle || shouldRollbackCachedArticle) &&
-            previousFeed !== undefined &&
-            shallowEqualRecord(currentFeed, optimisticFeed);
+        const latestPending = pendingReadToggleMutations.get(articleId);
+        if (!latestPending) return;
 
-          return {
-            articles: shouldRollbackVisibleArticle
-              ? state.articles.map((item) => (item.id === articleId ? article : item))
-              : state.articles,
-            articleDetailCache: shouldRollbackCachedArticle
-              ? {
-                  ...state.articleDetailCache,
-                  [articleId]: previousCachedArticle,
-                }
-              : state.articleDetailCache,
-            feeds: shouldRollbackFeed
-              ? state.feeds.map((feed) => (feed.id === article.feedId ? previousFeed : feed))
-              : state.feeds,
-          };
-        });
+        const operationIndex = latestPending.operations.findIndex(
+          (item) => item.id === operation.id,
+        );
+        if (operationIndex === -1) return;
+
+        const expectedProjection = getReadToggleProjection(latestPending);
+        latestPending.operations.splice(operationIndex, 1);
+        advanceReadToggleBaseline(latestPending);
+        set((state) =>
+          applyReadToggleProjection(state, articleId, latestPending, expectedProjection),
+        );
+        if (latestPending.operations.length === 0) {
+          pendingReadToggleMutations.delete(articleId);
+        }
       });
   },
 
