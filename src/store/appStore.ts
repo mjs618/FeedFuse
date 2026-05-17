@@ -131,6 +131,9 @@ interface AppState {
   toggleSidebar: () => void;
   markAsRead: (articleId: string) => void;
   markAllAsRead: (feedId?: string) => void;
+  toggleReadLater: (articleId: string) => void;
+  archiveArticle: (articleId: string) => void;
+  unarchiveArticle: (articleId: string) => void;
   addFeed: (feed: {
     title: string;
     url: string;
@@ -321,6 +324,19 @@ function updateCachedArticle(
   };
 }
 
+function updateArticleInVisibleCollections(
+  state: Pick<AppState, 'articles' | 'articleDetailCache'>,
+  articleId: string,
+  updater: (article: Article) => Article,
+): Pick<AppState, 'articles' | 'articleDetailCache'> {
+  return {
+    articles: state.articles.map((article) =>
+      article.id === articleId ? updater(article) : article,
+    ),
+    articleDetailCache: updateCachedArticle(state.articleDetailCache, articleId, updater),
+  };
+}
+
 export function getSelectedArticleFromState(
   state: Pick<AppState, 'selectedArticleId' | 'articles' | 'articleDetailCache'>,
 ): Article | null {
@@ -505,6 +521,22 @@ function sortArticlesByPublishedAtDesc(articles: Article[]): Article[] {
       return left.index - right.index;
     })
     .map(({ article }) => article);
+}
+
+function findNextVisibleArticleId(articles: Article[], archivedArticleId: string): string | null {
+  const currentIndex = articles.findIndex((article) => article.id === archivedArticleId);
+  if (currentIndex < 0 || articles.length <= 1) {
+    return null;
+  }
+
+  for (let offset = 1; offset < articles.length; offset += 1) {
+    const article = articles[(currentIndex + offset) % articles.length];
+    if (article.id !== archivedArticleId && !article.isArchived) {
+      return article.id;
+    }
+  }
+
+  return null;
 }
 
 function mergeSnapshotPage(
@@ -891,6 +923,102 @@ export const useAppStore = create<AppState>((set, get) => ({
       })
       .catch((err) => {
         runImmediateFailure({ actionKey: 'article.markAllRead', err });
+      });
+  },
+
+  toggleReadLater: (articleId) => {
+    const article = getArticleFromCollections(articleId, get().articles, get().articleDetailCache);
+    if (!article) return;
+
+    const nextValue = !Boolean(article.isReadLater);
+    const nextReadLaterAt = nextValue ? (article.readLaterAt ?? new Date().toISOString()) : null;
+
+    set((state) =>
+      updateArticleInVisibleCollections(state, articleId, (item) => ({
+        ...item,
+        isReadLater: nextValue,
+        readLaterAt: nextReadLaterAt,
+      })),
+    );
+
+    void patchArticle(articleId, { isReadLater: nextValue }, { notifyOnError: false })
+      .then(() => {
+        runImmediateSuccess({
+          actionKey: 'article.toggleReadLater',
+          context: { readLater: nextValue },
+        });
+      })
+      .catch((err) => {
+        runImmediateFailure({
+          actionKey: 'article.toggleReadLater',
+          context: { readLater: nextValue },
+          err,
+        });
+        void loadCurrentSnapshotSilently(get);
+      });
+  },
+
+  archiveArticle: (articleId) => {
+    const article = getArticleFromCollections(articleId, get().articles, get().articleDetailCache);
+    if (!article || article.isArchived) return;
+
+    const nextArchivedAt = article.archivedAt ?? new Date().toISOString();
+
+    set((state) => ({
+      ...updateArticleInVisibleCollections(state, articleId, (item) => ({
+        ...item,
+        isArchived: true,
+        archivedAt: nextArchivedAt,
+      })),
+      selectedArticleId:
+        state.selectedArticleId === articleId
+          ? findNextVisibleArticleId(state.articles, articleId)
+          : state.selectedArticleId,
+    }));
+
+    void patchArticle(articleId, { isArchived: true }, { notifyOnError: false })
+      .then(() => {
+        runImmediateSuccess({
+          actionKey: 'article.archive',
+          context: { archived: true },
+        });
+      })
+      .catch((err) => {
+        runImmediateFailure({
+          actionKey: 'article.archive',
+          context: { archived: true },
+          err,
+        });
+        void loadCurrentSnapshotSilently(get);
+      });
+  },
+
+  unarchiveArticle: (articleId) => {
+    const article = getArticleFromCollections(articleId, get().articles, get().articleDetailCache);
+    if (!article) return;
+
+    set((state) =>
+      updateArticleInVisibleCollections(state, articleId, (item) => ({
+        ...item,
+        isArchived: false,
+        archivedAt: null,
+      })),
+    );
+
+    void patchArticle(articleId, { isArchived: false }, { notifyOnError: false })
+      .then(() => {
+        runImmediateSuccess({
+          actionKey: 'article.archive',
+          context: { archived: false },
+        });
+      })
+      .catch((err) => {
+        runImmediateFailure({
+          actionKey: 'article.archive',
+          context: { archived: false },
+          err,
+        });
+        void loadCurrentSnapshotSilently(get);
       });
   },
 

@@ -30,4 +30,46 @@ describe('userOperationCatalog', () => {
     expect(shouldEmitUserOperationToast('article.aiSummary.generate', 'error')).toBe(false);
     expect(shouldEmitUserOperationToast('settings.save', 'error')).toBe(false);
   });
+
+  it('renders distinct read-later operation messages for add and remove contexts', () => {
+    expect(getUserOperationCatalogEntry('article.toggleReadLater')).toMatchObject({
+      mode: 'immediate',
+      category: 'article',
+    });
+
+    const added = renderUserOperationSuccess('article.toggleReadLater', { readLater: true });
+    const removed = renderUserOperationSuccess('article.toggleReadLater', { readLater: false });
+    const addError = renderUserOperationFailure('article.toggleReadLater', undefined, {
+      readLater: true,
+    });
+    const removeError = renderUserOperationFailure('article.toggleReadLater', undefined, {
+      readLater: false,
+    });
+
+    expect(added).not.toHaveLength(0);
+    expect(removed).not.toHaveLength(0);
+    expect(added).not.toBe(removed);
+    expect(addError).not.toBe(removeError);
+  });
+
+  it('renders distinct archive operation messages for archive and unarchive contexts', () => {
+    expect(getUserOperationCatalogEntry('article.archive')).toMatchObject({
+      mode: 'immediate',
+      category: 'article',
+    });
+
+    const archived = renderUserOperationSuccess('article.archive', { archived: true });
+    const unarchived = renderUserOperationSuccess('article.archive', { archived: false });
+    const archiveError = renderUserOperationFailure('article.archive', undefined, {
+      archived: true,
+    });
+    const unarchiveError = renderUserOperationFailure('article.archive', undefined, {
+      archived: false,
+    });
+
+    expect(archived).not.toHaveLength(0);
+    expect(unarchived).not.toHaveLength(0);
+    expect(archived).not.toBe(unarchived);
+    expect(archiveError).not.toBe(unarchiveError);
+  });
 });

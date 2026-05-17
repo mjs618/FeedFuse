@@ -107,6 +107,10 @@ function createSnapshotArticle(id: string, feedId: string, title: string) {
     filteredBy: [],
     isRead: false,
     isStarred: false,
+    isReadLater: false,
+    readLaterAt: null,
+    isArchived: false,
+    archivedAt: null,
     bodyTranslationEligible: false,
     bodyTranslationBlockedReason: null,
   };
@@ -258,6 +262,164 @@ describe('appStore api integration', () => {
     );
     expect(notifyError).not.toHaveBeenCalled();
     clearApiErrorNotifier();
+  });
+
+  it('toggles read later optimistically, persists it, and emits success operation context', async () => {
+    let patchBody: Record<string, unknown> | null = null;
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/reader/snapshot') && method === 'GET') {
+        return jsonResponse({
+          ok: true,
+          data: createSnapshotPage({
+            items: [createSnapshotArticle('3001', 'feed-1', 'Read Later Target')],
+          }),
+        });
+      }
+
+      if (url.includes('/api/articles/3001') && method === 'PATCH') {
+        patchBody = await getFetchCallJsonBody(input, init);
+        return jsonResponse({ ok: true, data: { updated: true } });
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    await useAppStore.getState().loadSnapshot({ view: 'all' });
+
+    useAppStore.getState().toggleReadLater('3001');
+    const article = useAppStore.getState().articles.find((item) => item.id === '3001');
+    expect(article).toMatchObject({ isReadLater: true });
+    expect(article?.readLaterAt).toEqual(expect.any(String));
+
+    await flushPromises();
+
+    const patchCall = fetchMock.mock.calls.find(
+      ([input, init]) =>
+        getFetchCallUrl(input).includes('/api/articles/3001') &&
+        getFetchCallMethod(input, init).toUpperCase() === 'PATCH',
+    );
+    expect(patchCall).toBeTruthy();
+    expect(patchBody).toEqual({
+      isReadLater: true,
+    });
+    expect(runImmediateSuccessMock).toHaveBeenCalledWith({
+      actionKey: 'article.toggleReadLater',
+      context: { readLater: true },
+    });
+  });
+
+  it('archives the selected article, advances selection, persists it, and emits success operation context', async () => {
+    let patchBody: Record<string, unknown> | null = null;
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/reader/snapshot') && method === 'GET') {
+        return jsonResponse({
+          ok: true,
+          data: createSnapshotPage({
+            items: [
+              createSnapshotArticle('3001', 'feed-1', 'Archive Target'),
+              createSnapshotArticle('3002', 'feed-1', 'Next Article'),
+            ],
+          }),
+        });
+      }
+
+      if (url.includes('/api/articles/3001') && method === 'PATCH') {
+        patchBody = await getFetchCallJsonBody(input, init);
+        return jsonResponse({ ok: true, data: { updated: true } });
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    await useAppStore.getState().loadSnapshot({ view: 'all' });
+    useAppStore.setState({ selectedArticleId: '3001' });
+
+    useAppStore.getState().archiveArticle('3001');
+
+    const archived = useAppStore.getState().articles.find((item) => item.id === '3001');
+    expect(archived).toMatchObject({ isArchived: true });
+    expect(archived?.archivedAt).toEqual(expect.any(String));
+    expect(useAppStore.getState().selectedArticleId).toBe('3002');
+
+    await flushPromises();
+
+    const patchCall = fetchMock.mock.calls.find(
+      ([input, init]) =>
+        getFetchCallUrl(input).includes('/api/articles/3001') &&
+        getFetchCallMethod(input, init).toUpperCase() === 'PATCH',
+    );
+    expect(patchCall).toBeTruthy();
+    expect(patchBody).toEqual({
+      isArchived: true,
+    });
+    expect(runImmediateSuccessMock).toHaveBeenCalledWith({
+      actionKey: 'article.archive',
+      context: { archived: true },
+    });
+  });
+
+  it('unarchives an article, clears archivedAt, persists it, and emits success operation context', async () => {
+    let patchBody: Record<string, unknown> | null = null;
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/reader/snapshot') && method === 'GET') {
+        return jsonResponse({
+          ok: true,
+          data: createSnapshotPage({
+            items: [
+              {
+                ...createSnapshotArticle('3001', 'feed-1', 'Archived Target'),
+                isArchived: true,
+                archivedAt: '2026-05-01T00:00:00.000Z',
+              },
+            ],
+          }),
+        });
+      }
+
+      if (url.includes('/api/articles/3001') && method === 'PATCH') {
+        patchBody = await getFetchCallJsonBody(input, init);
+        return jsonResponse({ ok: true, data: { updated: true } });
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    await useAppStore.getState().loadSnapshot({ view: 'all' });
+
+    useAppStore.getState().unarchiveArticle('3001');
+
+    expect(useAppStore.getState().articles.find((item) => item.id === '3001')).toMatchObject({
+      isArchived: false,
+      archivedAt: null,
+    });
+
+    await flushPromises();
+
+    const patchCall = fetchMock.mock.calls.find(
+      ([input, init]) =>
+        getFetchCallUrl(input).includes('/api/articles/3001') &&
+        getFetchCallMethod(input, init).toUpperCase() === 'PATCH',
+    );
+    expect(patchCall).toBeTruthy();
+    expect(patchBody).toEqual({
+      isArchived: false,
+    });
+    expect(runImmediateSuccessMock).toHaveBeenCalledWith({
+      actionKey: 'article.archive',
+      context: { archived: false },
+    });
   });
 
   it('normalizes mutually exclusive feed trigger flags from snapshot dto', async () => {

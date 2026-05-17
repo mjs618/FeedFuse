@@ -21,6 +21,8 @@ export type UserOperationActionKey =
   | 'article.markRead'
   | 'article.markAllRead'
   | 'article.toggleStar'
+  | 'article.toggleReadLater'
+  | 'article.archive'
   | 'article.aiSummary.generate'
   | 'article.aiTranslate.generate'
   | 'article.aiTranslate.retrySegment'
@@ -181,6 +183,32 @@ const catalog: Record<UserOperationActionKey, UserOperationCatalogEntry> = {
     },
     // The star icon/button label already reflects the new state inline.
     toastVisibility: HIDE_SUCCESS_TOAST,
+  },
+  'article.toggleReadLater': {
+    mode: 'immediate',
+    category: 'article',
+    successMessage: (context) => {
+      const readLater = context?.readLater === true;
+      return readLater ? '已加入稍后读' : '已移出稍后读';
+    },
+    errorPrefix: (context) => {
+      const readLater = context?.readLater === true;
+      return readLater ? '加入稍后读失败' : '移出稍后读失败';
+    },
+    toastVisibility: { started: false },
+  },
+  'article.archive': {
+    mode: 'immediate',
+    category: 'article',
+    successMessage: (context) => {
+      const archived = context?.archived === true;
+      return archived ? '已归档文章' : '已取消归档';
+    },
+    errorPrefix: (context) => {
+      const archived = context?.archived === true;
+      return archived ? '归档文章失败' : '取消归档失败';
+    },
+    toastVisibility: { started: false },
   },
   'article.aiSummary.generate': {
     mode: 'deferred',
