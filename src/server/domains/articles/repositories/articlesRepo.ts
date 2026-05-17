@@ -53,7 +53,11 @@ const articleRowColumnsSql = `
   is_read as "isRead",
   read_at as "readAt",
   is_starred as "isStarred",
-  starred_at as "starredAt"
+  starred_at as "starredAt",
+  is_read_later as "isReadLater",
+  read_later_at as "readLaterAt",
+  is_archived as "isArchived",
+  archived_at as "archivedAt"
 `;
 
 export interface ArticleRow {
@@ -102,6 +106,10 @@ export interface ArticleRow {
   readAt: string | null;
   isStarred: boolean;
   starredAt: string | null;
+  isReadLater: boolean;
+  readLaterAt: string | null;
+  isArchived: boolean;
+  archivedAt: string | null;
 }
 
 export interface ArticleSearchRow {
@@ -416,6 +424,40 @@ export async function setArticleStarred(
       where id = $1
     `,
     [id, isStarred],
+  );
+}
+
+export async function setArticleReadLater(
+  pool: DbClient,
+  id: string,
+  isReadLater: boolean,
+): Promise<void> {
+  await pool.query(
+    `
+      update articles
+      set
+        is_read_later = $2,
+        read_later_at = case when $2 then coalesce(read_later_at, now()) else null end
+      where id = $1
+    `,
+    [id, isReadLater],
+  );
+}
+
+export async function setArticleArchived(
+  pool: DbClient,
+  id: string,
+  isArchived: boolean,
+): Promise<void> {
+  await pool.query(
+    `
+      update articles
+      set
+        is_archived = $2,
+        archived_at = case when $2 then coalesce(archived_at, now()) else null end
+      where id = $1
+    `,
+    [id, isArchived],
   );
 }
 
