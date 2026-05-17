@@ -593,6 +593,37 @@ describe('ReaderLayout', () => {
     });
   });
 
+  it('suppresses reader action shortcuts while shortcut help is open', async () => {
+    resetSettingsStore();
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
+    const toggleStar = vi.fn();
+    useAppStore.setState({
+      articles: [
+        createReaderArticle({ id: 'article-1', title: 'Article 1' }),
+        createReaderArticle({ id: 'article-2', title: 'Article 2' }),
+      ],
+      selectedView: 'all',
+      selectedArticleId: 'article-1',
+      toggleStar,
+    });
+
+    await renderWithNotificationsSettled();
+
+    fireEvent.keyDown(window, { key: '?', shiftKey: true });
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'j' });
+      fireEvent.keyDown(window, { key: 's' });
+      fireEvent.keyDown(window, { key: '?', shiftKey: true });
+      await Promise.resolve();
+    });
+
+    expect(useAppStore.getState().selectedArticleId).toBe('article-1');
+    expect(toggleStar).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
   it('hydrates responsive layout without rebuilding from a mismatched mobile first render', async () => {
     resetSettingsStore();
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });

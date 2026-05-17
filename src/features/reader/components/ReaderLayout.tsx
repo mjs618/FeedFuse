@@ -81,6 +81,11 @@ function isEditableShortcutTarget(target: EventTarget | null) {
   return false;
 }
 
+function isDialogShortcutTarget(target: EventTarget | null) {
+  const element = target instanceof Element ? target : null;
+  return Boolean(element?.closest('[role="dialog"]'));
+}
+
 const MemoizedFeedList = memo(FeedList);
 const MemoizedArticleList = memo(ArticleList);
 const MemoizedArticleView = memo(ArticleView);
@@ -293,6 +298,11 @@ export default function ReaderLayout({ renderedAt, initialSelectedView }: Reader
         return;
       }
 
+      const overlayOpen = shortcutHelpOpen || searchOpen || settingsOpen || feedSheetOpen;
+      if (overlayOpen || isDialogShortcutTarget(event.target)) {
+        return;
+      }
+
       if (event.key === '?') {
         event.preventDefault();
         setShortcutHelpOpen(true);
@@ -383,6 +393,10 @@ export default function ReaderLayout({ renderedAt, initialSelectedView }: Reader
     selectedArticleId,
     selectedView,
     setSelectedArticle,
+    feedSheetOpen,
+    searchOpen,
+    settingsOpen,
+    shortcutHelpOpen,
     showUnreadOnly,
     toggleReadLater,
     toggleStar,
