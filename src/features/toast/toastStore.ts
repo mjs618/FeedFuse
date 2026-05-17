@@ -2,10 +2,16 @@ import { create } from 'zustand';
 
 export type ToastTone = 'success' | 'info' | 'error';
 
+export type ToastAction = {
+  label: string;
+  onClick: () => void;
+};
+
 export interface ToastItem {
   id: string;
   tone: ToastTone;
   message: string;
+  action?: ToastAction;
   dedupeKey: string;
   createdAt: number;
   durationMs: number;
@@ -44,6 +50,7 @@ type PushInput = {
   id?: string;
   dedupeKey?: string;
   durationMs?: number;
+  action?: ToastAction;
 };
 
 type ToastState = {
@@ -57,7 +64,7 @@ const lastSeenAtByKey = new Map<string, number>();
 
 export const toastStore = create<ToastState>((set, get) => ({
   toasts: [],
-  push: ({ tone, message: rawMessage, id, dedupeKey: dedupeKeyInput, durationMs }) => {
+  push: ({ tone, message: rawMessage, id, dedupeKey: dedupeKeyInput, durationMs, action }) => {
     const message = rawMessage.trim();
     if (!message) return '';
 
@@ -77,6 +84,7 @@ export const toastStore = create<ToastState>((set, get) => ({
       id: resolvedId,
       tone,
       message,
+      action,
       dedupeKey,
       createdAt: now,
       durationMs: typeof durationMs === 'number' ? durationMs : TTL_BY_TONE[tone],

@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AI_DIGEST_VIEW_ID } from '@/lib/reader/view';
 
-const { runImmediateFailureMock, runImmediateSuccessMock } = vi.hoisted(() => ({
+const { runImmediateFailureMock, runImmediateSuccessMock, toastSuccessMock } = vi.hoisted(() => ({
   runImmediateFailureMock: vi.fn(),
   runImmediateSuccessMock: vi.fn(),
+  toastSuccessMock: vi.fn(),
 }));
 
 type AppStoreModule = typeof import('../../store/appStore');
@@ -13,6 +14,12 @@ let fetchMock: ReturnType<typeof vi.fn>;
 vi.mock('../../features/notifications/userOperationNotifier', () => ({
   runImmediateSuccess: (...args: unknown[]) => runImmediateSuccessMock(...args),
   runImmediateFailure: (...args: unknown[]) => runImmediateFailureMock(...args),
+}));
+
+vi.mock('../../features/toast/toast', () => ({
+  toast: {
+    success: (...args: unknown[]) => toastSuccessMock(...args),
+  },
 }));
 
 function jsonResponse(payload: unknown, init?: ResponseInit) {
@@ -195,6 +202,7 @@ beforeEach(async () => {
   fetchMock = vi.fn();
   vi.stubGlobal('fetch', fetchMock);
   runImmediateSuccessMock.mockReset();
+  toastSuccessMock.mockReset();
   runImmediateFailureMock.mockReset();
   window.localStorage.clear();
   window.history.replaceState({}, '', '/');
@@ -359,8 +367,8 @@ describe('appStore api integration', () => {
     });
   });
 
-  it('archives the selected article, advances selection, persists it, and emits success operation context', async () => {
-    let patchBody: Record<string, unknown> | null = null;
+  it('archives the selected article, advances selection, persists it, and emits undo toast action', async () => {
+    const patchBodies: Record<string, unknown>[] = [];
 
     fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = getFetchCallUrl(input);
@@ -382,7 +390,7 @@ describe('appStore api integration', () => {
       }
 
       if (url.includes('/api/articles/3001') && method === 'PATCH') {
-        patchBody = await getFetchCallJsonBody(input, init);
+        patchBodies.push(await getFetchCallJsonBody(input, init));
         return jsonResponse({ ok: true, data: { updated: true } });
       }
 
@@ -407,12 +415,36 @@ describe('appStore api integration', () => {
         getFetchCallMethod(input, init).toUpperCase() === 'PATCH',
     );
     expect(patchCall).toBeTruthy();
-    expect(patchBody).toEqual({
+    expect(patchBodies[0]).toEqual({
       isArchived: true,
     });
-    expect(runImmediateSuccessMock).toHaveBeenCalledWith({
+
+    expect(toastSuccessMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        action: expect.objectContaining({
+          label: expect.any(String),
+          onClick: expect.any(Function),
+        }),
+      }),
+    );
+    expect(runImmediateSuccessMock).not.toHaveBeenCalledWith({
       actionKey: 'article.archive',
       context: { archived: true },
+    });
+
+    const toastOptions = toastSuccessMock.mock.calls[0]?.[1] as
+      | { action?: { onClick?: () => void } }
+      | undefined;
+    toastOptions?.action?.onClick?.();
+
+    expect(useAppStore.getState().articles.find((item) => item.id === '3001')).toMatchObject({
+      isArchived: false,
+      archivedAt: null,
+    });
+    await flushPromises();
+    expect(patchBodies[1]).toEqual({
+      isArchived: false,
     });
   });
 

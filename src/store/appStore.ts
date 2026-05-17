@@ -22,6 +22,8 @@ import {
   runImmediateFailure,
   runImmediateSuccess,
 } from '../features/notifications/userOperationNotifier';
+import { toast } from '../features/toast/toast';
+import { renderUserOperationSuccess } from '@/lib/userOperationCatalog';
 
 const READER_SELECTION_VIEW_PARAM = 'view';
 const READER_SELECTION_ARTICLE_PARAM = 'article';
@@ -1009,9 +1011,11 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     void patchArticle(articleId, { isArchived: true }, { notifyOnError: false })
       .then(() => {
-        runImmediateSuccess({
-          actionKey: 'article.archive',
-          context: { archived: true },
+        toast.success(renderUserOperationSuccess('article.archive', { archived: true }), {
+          action: {
+            label: '撤销',
+            onClick: () => get().unarchiveArticle(articleId),
+          },
         });
       })
       .catch((err) => {

@@ -81,6 +81,23 @@ export function ToastHost() {
           <RadixToast.Description className="min-w-0 flex-1 text-sm font-medium leading-5">
             {item.message}
           </RadixToast.Description>
+          {item.action ? (
+            <RadixToast.Action asChild altText={item.action.label}>
+              <button
+                type="button"
+                className="inline-flex h-7 shrink-0 items-center justify-center rounded-lg border border-current/16 px-2.5 text-xs font-semibold text-current/80 transition-[background-color,color,border-color] hover:border-current/24 hover:bg-foreground/6 hover:text-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/20 focus-visible:ring-offset-2"
+                onClick={() => {
+                  try {
+                    item.action?.onClick();
+                  } finally {
+                    dismiss(item.id);
+                  }
+                }}
+              >
+                {item.action.label}
+              </button>
+            </RadixToast.Action>
+          ) : null}
           <RadixToast.Close
             aria-label="关闭提醒"
             className="-mr-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border border-transparent text-current/70 transition-[background-color,color,border-color] hover:border-border/60 hover:bg-foreground/6 hover:text-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/20 focus-visible:ring-offset-2"

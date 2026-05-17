@@ -1,12 +1,13 @@
 'use client';
 
-import type { ToastTone } from './toastStore';
+import type { ToastAction, ToastTone } from './toastStore';
 import { toastStore } from './toastStore';
 
 export type ToastOptions = {
   id?: string;
   dedupeKey?: string;
   durationMs?: number;
+  action?: ToastAction;
 };
 
 function push(tone: ToastTone, message: string, options?: ToastOptions) {
@@ -16,6 +17,7 @@ function push(tone: ToastTone, message: string, options?: ToastOptions) {
     id: options?.id,
     dedupeKey: options?.dedupeKey,
     durationMs: options?.durationMs,
+    action: options?.action,
   });
 }
 

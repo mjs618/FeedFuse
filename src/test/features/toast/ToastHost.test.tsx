@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { notifyApiError } from '@/lib/api/apiErrorNotifier';
 import { ToastHost } from '../../../features/toast/components/ToastHost';
 import { toast } from '../../../features/toast/toast';
@@ -59,6 +59,30 @@ describe('ToastHost', () => {
 
     await waitFor(() => {
       expect(screen.queryByText('第三条')).not.toBeInTheDocument();
+    });
+  });
+
+  it('runs toast actions and dismisses the toast after action click', async () => {
+    toastStore.getState().reset();
+    const onClick = vi.fn();
+
+    render(<ToastHost />);
+
+    await act(async () => {
+      toast.success('Archived article', {
+        action: {
+          label: '撤销',
+          onClick,
+        },
+      });
+    });
+
+    const actionButton = await screen.findByRole('button', { name: '撤销' });
+    fireEvent.click(actionButton);
+
+    expect(onClick).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(screen.queryByText('Archived article')).not.toBeInTheDocument();
     });
   });
 
