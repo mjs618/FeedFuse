@@ -417,6 +417,67 @@ describe('appStore api integration', () => {
     });
   });
 
+  it('rolls back failed read toggle for a retained selected article in unread view', async () => {
+    const retainedReadArticle = {
+      ...createSnapshotArticle('3001', 'feed-1', 'Retained Read Article'),
+      isRead: true,
+    };
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/reader/snapshot') && method === 'GET') {
+        return jsonResponse({
+          ok: true,
+          data: createSnapshotPage({
+            feeds: [createSnapshotFeed('feed-1', 'Feed One', 0)],
+            items: [],
+            totalCount: 0,
+          }),
+        });
+      }
+
+      if (url.includes('/api/articles/3001') && method === 'PATCH') {
+        return jsonResponse(
+          {
+            ok: false,
+            error: {
+              code: 'internal_error',
+              message: '更新失败',
+            },
+          },
+          { status: 500 },
+        );
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    useAppStore.setState({
+      feeds: [createSnapshotFeed('feed-1', 'Feed One', 0)],
+      articles: [retainedReadArticle],
+      selectedView: 'unread',
+      selectedArticleId: '3001',
+    });
+
+    useAppStore.getState().toggleReadState('3001');
+    expect(useAppStore.getState().articles[0]).toMatchObject({ isRead: false });
+    expect(useAppStore.getState().feeds[0].unreadCount).toBe(1);
+
+    await flushPromises();
+    await flushPromises();
+
+    expect(useAppStore.getState().articles[0]).toMatchObject({ isRead: true });
+    expect(useAppStore.getState().feeds[0].unreadCount).toBe(0);
+    expect(runImmediateFailureMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionKey: 'article.toggleRead',
+        context: { read: false },
+      }),
+    );
+  });
+
   it('archives the selected article, advances selection, persists it, and emits undo toast action', async () => {
     const patchBodies: Record<string, unknown>[] = [];
 

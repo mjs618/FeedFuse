@@ -929,11 +929,18 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   toggleReadState: (articleId) => {
-    const article = getArticleFromCollections(articleId, get().articles, get().articleDetailCache);
+    const stateBeforeToggle = get();
+    const article = getArticleFromCollections(
+      articleId,
+      stateBeforeToggle.articles,
+      stateBeforeToggle.articleDetailCache,
+    );
     if (!article) return;
 
     const nextValue = !article.isRead;
     const unreadCountDelta = nextValue ? -1 : 1;
+    const previousCachedArticle = stateBeforeToggle.articleDetailCache[articleId];
+    const previousFeed = stateBeforeToggle.feeds.find((feed) => feed.id === article.feedId);
 
     set((state) => ({
       articles: state.articles.map((item) =>
@@ -963,7 +970,26 @@ export const useAppStore = create<AppState>((set, get) => ({
           context: { read: nextValue },
           err,
         });
-        void loadCurrentSnapshotSilently(get);
+        set((state) => ({
+          articles: state.articles.map((item) =>
+            item.id === articleId ? article : item,
+          ),
+          articleDetailCache: (() => {
+            if (previousCachedArticle) {
+              return {
+                ...state.articleDetailCache,
+                [articleId]: previousCachedArticle,
+              };
+            }
+
+            const remainingCache = { ...state.articleDetailCache };
+            delete remainingCache[articleId];
+            return remainingCache;
+          })(),
+          feeds: state.feeds.map((feed) =>
+            feed.id === article.feedId && previousFeed ? previousFeed : feed,
+          ),
+        }));
       });
   },
 

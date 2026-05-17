@@ -54,6 +54,7 @@ const MOBILE_SMART_VIEW_LABELS: Record<string, string> = {
   [ARCHIVED_VIEW_ID]: '归档',
 };
 const GLOBAL_SEARCH_SHORTCUT_KEY = 'f';
+const READER_DIALOG_SELECTOR = '[role="dialog"], [role="alertdialog"]';
 
 function isEditableShortcutTarget(target: EventTarget | null) {
   let currentNode = target instanceof Node ? target : null;
@@ -83,11 +84,14 @@ function isEditableShortcutTarget(target: EventTarget | null) {
 
 function isDialogShortcutTarget(target: EventTarget | null) {
   const element = target instanceof Element ? target : null;
-  return Boolean(element?.closest('[role="dialog"]'));
+  return Boolean(element?.closest(READER_DIALOG_SELECTOR));
 }
 
 function hasOpenDialog() {
-  return typeof document !== 'undefined' && document.querySelector('[role="dialog"]') !== null;
+  return (
+    typeof document !== 'undefined' &&
+    document.querySelector(READER_DIALOG_SELECTOR) !== null
+  );
 }
 
 const MemoizedFeedList = memo(FeedList);
@@ -292,22 +296,24 @@ export default function ReaderLayout({ renderedAt, initialSelectedView }: Reader
 
       const key = event.key.toLowerCase();
 
-      if ((event.metaKey || event.ctrlKey) && key === GLOBAL_SEARCH_SHORTCUT_KEY) {
-        event.preventDefault();
-        setSearchOpen(true);
-        return;
-      }
-
-      if (event.metaKey || event.ctrlKey) {
-        return;
-      }
-
       const actionSuppressingOverlayOpen =
         searchOpen ||
         settingsOpen ||
         feedSheetOpen ||
         hasOpenDialog() ||
         isDialogShortcutTarget(event.target);
+
+      if ((event.metaKey || event.ctrlKey) && key === GLOBAL_SEARCH_SHORTCUT_KEY) {
+        event.preventDefault();
+        if (!actionSuppressingOverlayOpen) {
+          setSearchOpen(true);
+        }
+        return;
+      }
+
+      if (event.metaKey || event.ctrlKey) {
+        return;
+      }
 
       if (event.key === '?') {
         if (shortcutHelpOpen || !actionSuppressingOverlayOpen) {
