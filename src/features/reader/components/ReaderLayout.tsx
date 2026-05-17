@@ -13,6 +13,7 @@ import ArticleView from '../../articles/components/ArticleView';
 import FeedList from '../../feeds/components/FeedList';
 import ResizeHandle from './ResizeHandle';
 import GlobalSearchDialog from './GlobalSearchDialog';
+import ShortcutHelpDialog from './ShortcutHelpDialog';
 import { getSelectedArticleFromState, useAppStore } from '../../../store/appStore';
 import { useSettingsStore } from '../../../store/settingsStore';
 import type { ViewType } from '../../../types';
@@ -34,6 +35,12 @@ import {
   READER_RIGHT_PANE_MIN_WIDTH,
   READER_TABLET_MIN_WIDTH,
 } from '../utils';
+import { buildArticleListDerivedState } from '../../articles/utils';
+import {
+  ARCHIVED_VIEW_ID,
+  READ_LATER_VIEW_ID,
+  shouldUseDefaultUnreadOnly,
+} from '@/lib/reader/view';
 
 type ResizeTarget = 'left' | 'middle';
 const LEFT_RESIZE_PREVIEW_OFFSET_VARIABLE = '--reader-left-resize-preview-offset';
@@ -43,6 +50,8 @@ const MOBILE_SMART_VIEW_LABELS: Record<string, string> = {
   unread: '未读文章',
   starred: '收藏文章',
   'ai-digest': '智能报告',
+  [READ_LATER_VIEW_ID]: '稍后读',
+  [ARCHIVED_VIEW_ID]: '归档',
 };
 const GLOBAL_SEARCH_SHORTCUT_KEY = 'f';
 
@@ -87,9 +96,16 @@ interface ReaderLayoutProps {
 
 export default function ReaderLayout({ renderedAt, initialSelectedView }: ReaderLayoutProps = {}) {
   const sidebarCollapsed = useAppStore((state) => state.sidebarCollapsed);
+  const feeds = useAppStore((state) => state.feeds);
+  const articles = useAppStore((state) => state.articles);
   const selectedView = useAppStore((state) => state.selectedView);
   const selectedArticleId = useAppStore((state) => state.selectedArticleId);
   const setSelectedArticle = useAppStore((state) => state.setSelectedArticle);
+  const showUnreadOnly = useAppStore((state) => state.showUnreadOnly);
+  const toggleStar = useAppStore((state) => state.toggleStar);
+  const toggleReadLater = useAppStore((state) => state.toggleReadLater);
+  const archiveArticle = useAppStore((state) => state.archiveArticle);
+  const markAsRead = useAppStore((state) => state.markAsRead);
   const general = useSettingsStore((state) => state.persistedSettings.general);
   const updateReaderLayoutSettings = useSettingsStore((state) => state.updateReaderLayoutSettings);
   const selectedArticleTitle = useAppStore(
@@ -104,6 +120,7 @@ export default function ReaderLayout({ renderedAt, initialSelectedView }: Reader
   });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
   const [activeSearchHighlightQuery, setActiveSearchHighlightQuery] = useState('');
   const selectionKey = `${selectedView}:${selectedArticleId ?? ''}`;
   const [feedSheetState, setFeedSheetState] = useState(() => ({
@@ -255,11 +272,7 @@ export default function ReaderLayout({ renderedAt, initialSelectedView }: Reader
   useEffect(() => {
     // Reader-level shortcuts live here because this layout owns the search dialog state.
     const handleGlobalShortcuts = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.altKey || event.shiftKey) {
-        return;
-      }
-
-      if ((!event.metaKey && !event.ctrlKey) || event.key.toLowerCase() !== GLOBAL_SEARCH_SHORTCUT_KEY) {
+      if (event.defaultPrevented || event.altKey || (event.shiftKey && event.key !== '?')) {
         return;
       }
 
@@ -268,15 +281,112 @@ export default function ReaderLayout({ renderedAt, initialSelectedView }: Reader
         return;
       }
 
-      event.preventDefault();
-      setSearchOpen(true);
+      const key = event.key.toLowerCase();
+
+      if ((event.metaKey || event.ctrlKey) && key === GLOBAL_SEARCH_SHORTCUT_KEY) {
+        event.preventDefault();
+        setSearchOpen(true);
+        return;
+      }
+
+      if (event.metaKey || event.ctrlKey) {
+        return;
+      }
+
+      if (event.key === '?') {
+        event.preventDefault();
+        setShortcutHelpOpen(true);
+        return;
+      }
+
+      if (key === 'j' || key === 'k') {
+        const aiDigestFeedIds = new Set(
+          feeds
+            .filter((feed) => (feed.kind ?? 'rss') === 'ai_digest')
+            .map((feed) => feed.id),
+        );
+        const showUnreadFilterActive =
+          selectedView === 'unread' ||
+          (showUnreadOnly && shouldUseDefaultUnreadOnly(selectedView));
+        const visibleArticles = buildArticleListDerivedState({
+          articles,
+          feeds,
+          selectedView,
+          selectedArticleId,
+          displayMode: 'card',
+          showUnreadFilterActive,
+          retainedVisibleArticleIds: new Set(),
+          aiDigestFeedIds,
+          referenceTime: new Date(),
+        }).filteredArticles;
+
+        if (visibleArticles.length === 0) {
+          return;
+        }
+
+        const currentIndex = visibleArticles.findIndex((article) => article.id === selectedArticleId);
+        const nextIndex =
+          currentIndex === -1
+            ? key === 'j'
+              ? 0
+              : visibleArticles.length - 1
+            : Math.min(
+                visibleArticles.length - 1,
+                Math.max(0, currentIndex + (key === 'j' ? 1 : -1)),
+              );
+        const nextArticleId = visibleArticles[nextIndex]?.id;
+
+        if (nextArticleId && nextArticleId !== selectedArticleId) {
+          event.preventDefault();
+          setSelectedArticle(nextArticleId);
+        }
+        return;
+      }
+
+      if (!selectedArticleId) {
+        return;
+      }
+
+      if (key === 's') {
+        event.preventDefault();
+        toggleStar(selectedArticleId);
+        return;
+      }
+
+      if (key === 'l') {
+        event.preventDefault();
+        toggleReadLater(selectedArticleId);
+        return;
+      }
+
+      if (key === 'e') {
+        event.preventDefault();
+        archiveArticle(selectedArticleId);
+        return;
+      }
+
+      if (key === 'm') {
+        event.preventDefault();
+        markAsRead(selectedArticleId);
+      }
     };
 
     window.addEventListener('keydown', handleGlobalShortcuts);
     return () => {
       window.removeEventListener('keydown', handleGlobalShortcuts);
     };
-  }, []);
+  }, [
+    archiveArticle,
+    articles,
+    feeds,
+    markAsRead,
+    selectedArticleId,
+    selectedView,
+    setSelectedArticle,
+    showUnreadOnly,
+    toggleReadLater,
+    toggleStar,
+  ]);
 
   const isResizeTargetActive = (target: ResizeTarget) => visibleResizeTarget === target;
 
@@ -570,6 +680,8 @@ export default function ReaderLayout({ renderedAt, initialSelectedView }: Reader
           });
         }}
       />
+
+      <ShortcutHelpDialog open={shortcutHelpOpen} onOpenChange={setShortcutHelpOpen} />
 
       {settingsOpen && <SettingsCenterModal onClose={() => setSettingsOpen(false)} />}
     </div>

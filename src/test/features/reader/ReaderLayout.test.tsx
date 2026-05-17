@@ -42,6 +42,29 @@ import {
 import { defaultPersistedSettings } from '../../../features/settings/settingsSchema';
 import { useSettingsStore } from '../../../store/settingsStore';
 import { useAppStore } from '../../../store/appStore';
+import type { Article } from '../../../types';
+
+function createReaderArticle(overrides: Partial<Article> = {}): Article {
+  return {
+    id: 'article-1',
+    feedId: 'feed-1',
+    title: 'Article 1',
+    content: '<p>content</p>',
+    summary: 'summary',
+    publishedAt: '2026-01-01T00:00:00.000Z',
+    link: 'https://example.com/article-1',
+    isRead: false,
+    isStarred: false,
+    ...overrides,
+  };
+}
+
+const initialAppStoreActions = {
+  toggleStar: useAppStore.getState().toggleStar,
+  toggleReadLater: useAppStore.getState().toggleReadLater,
+  archiveArticle: useAppStore.getState().archiveArticle,
+  markAsRead: useAppStore.getState().markAsRead,
+};
 
 function resetSettingsStore() {
   useSettingsStore.setState((state) => ({
@@ -62,6 +85,7 @@ function resetSettingsStore() {
     selectedArticleId: null,
     sidebarCollapsed: false,
     snapshotLoading: false,
+    ...initialAppStoreActions,
   });
 }
 
@@ -484,6 +508,89 @@ describe('ReaderLayout', () => {
     } finally {
       input.remove();
     }
+  });
+
+  it('moves selection through visible articles with j and k', async () => {
+    resetSettingsStore();
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
+    useAppStore.setState({
+      articles: [
+        createReaderArticle({ id: 'article-1', title: 'Article 1' }),
+        createReaderArticle({ id: 'article-2', title: 'Article 2' }),
+      ],
+      selectedView: 'all',
+      selectedArticleId: 'article-1',
+    });
+
+    await renderWithNotificationsSettled();
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'j' });
+      await Promise.resolve();
+    });
+    expect(useAppStore.getState().selectedArticleId).toBe('article-2');
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'k' });
+      await Promise.resolve();
+    });
+    expect(useAppStore.getState().selectedArticleId).toBe('article-1');
+  });
+
+  it('runs triage shortcuts for the selected article', async () => {
+    resetSettingsStore();
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
+    const toggleStar = vi.fn();
+    const toggleReadLater = vi.fn();
+    const archiveArticle = vi.fn();
+    const markAsRead = vi.fn();
+    useAppStore.setState({
+      articles: [createReaderArticle({ id: 'article-1' })],
+      selectedView: 'all',
+      selectedArticleId: 'article-1',
+      toggleStar,
+      toggleReadLater,
+      archiveArticle,
+      markAsRead,
+    });
+
+    await renderWithNotificationsSettled();
+
+    fireEvent.keyDown(window, { key: 's' });
+    fireEvent.keyDown(window, { key: 'l' });
+    fireEvent.keyDown(window, { key: 'e' });
+    fireEvent.keyDown(window, { key: 'm' });
+
+    expect(toggleStar).toHaveBeenCalledWith('article-1');
+    expect(toggleReadLater).toHaveBeenCalledWith('article-1');
+    expect(archiveArticle).toHaveBeenCalledWith('article-1');
+    expect(markAsRead).toHaveBeenCalledWith('article-1');
+  });
+
+  it('opens and closes shortcut help with ? while preserving editable targets', async () => {
+    resetSettingsStore();
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
+
+    await renderWithNotificationsSettled();
+
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    input.focus();
+
+    try {
+      fireEvent.keyDown(input, { key: '?' });
+      expect(screen.queryByRole('dialog', { name: '快捷键' })).not.toBeInTheDocument();
+    } finally {
+      input.remove();
+    }
+
+    fireEvent.keyDown(window, { key: '?', shiftKey: true });
+    expect(screen.getByRole('dialog', { name: '快捷键' })).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '快捷键' })).not.toBeInTheDocument();
+    });
   });
 
   it('hydrates responsive layout without rebuilding from a mismatched mobile first render', async () => {
