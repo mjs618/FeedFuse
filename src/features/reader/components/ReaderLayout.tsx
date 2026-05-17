@@ -86,6 +86,10 @@ function isDialogShortcutTarget(target: EventTarget | null) {
   return Boolean(element?.closest('[role="dialog"]'));
 }
 
+function hasOpenDialog() {
+  return typeof document !== 'undefined' && document.querySelector('[role="dialog"]') !== null;
+}
+
 const MemoizedFeedList = memo(FeedList);
 const MemoizedArticleList = memo(ArticleList);
 const MemoizedArticleView = memo(ArticleView);
@@ -298,7 +302,8 @@ export default function ReaderLayout({ renderedAt, initialSelectedView }: Reader
         return;
       }
 
-      const overlayOpen = shortcutHelpOpen || searchOpen || settingsOpen || feedSheetOpen;
+      const overlayOpen =
+        shortcutHelpOpen || searchOpen || settingsOpen || feedSheetOpen || hasOpenDialog();
       if (overlayOpen || isDialogShortcutTarget(event.target)) {
         return;
       }
