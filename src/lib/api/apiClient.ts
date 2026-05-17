@@ -439,10 +439,10 @@ export interface ReaderSnapshotDto {
       isFiltered: boolean;
       filteredBy: string[];
       isRead: boolean;
-      isReadLater: boolean;
-      readLaterAt: string | null;
-      isArchived: boolean;
-      archivedAt: string | null;
+      isReadLater?: boolean;
+      readLaterAt?: string | null;
+      isArchived?: boolean;
+      archivedAt?: string | null;
       isStarred: boolean;
       bodyTranslationEligible?: boolean;
       bodyTranslationBlockedReason?: string | null;
@@ -1225,10 +1225,10 @@ export function mapSnapshotArticleItem(dto: ReaderSnapshotDto['articles']['items
     isFiltered: dto.isFiltered,
     filteredBy: dto.filteredBy,
     isRead: dto.isRead,
-    isReadLater: dto.isReadLater,
-    readLaterAt: dto.readLaterAt,
-    isArchived: dto.isArchived,
-    archivedAt: dto.archivedAt,
+    isReadLater: dto.isReadLater ?? false,
+    readLaterAt: dto.readLaterAt ?? null,
+    isArchived: dto.isArchived ?? false,
+    archivedAt: dto.archivedAt ?? null,
     isStarred: dto.isStarred,
     bodyTranslationEligible: dto.bodyTranslationEligible,
     bodyTranslationBlockedReason: dto.bodyTranslationBlockedReason,

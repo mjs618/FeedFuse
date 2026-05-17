@@ -197,6 +197,10 @@ describe('mapSnapshotArticleItem', () => {
 
     expect(mapped.previewImage).toBe('https://example.com/preview.jpg');
     expect(mapped.content).toBe('');
+    expect(mapped.isReadLater).toBe(false);
+    expect(mapped.readLaterAt).toBeNull();
+    expect(mapped.isArchived).toBe(false);
+    expect(mapped.archivedAt).toBeNull();
   });
 
   it('prefers titleZh and keeps title/titleOriginal fields from snapshot payload', () => {
