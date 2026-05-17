@@ -349,6 +349,32 @@ export function getSelectedArticleFromState(
   );
 }
 
+function preserveLocalWorkflowState(fetchedArticle: Article, existingArticle?: Article): Article {
+  if (!existingArticle) {
+    return fetchedArticle;
+  }
+
+  return {
+    ...fetchedArticle,
+    isReadLater:
+      typeof existingArticle.isReadLater === 'boolean'
+        ? existingArticle.isReadLater
+        : fetchedArticle.isReadLater,
+    readLaterAt:
+      typeof existingArticle.isReadLater === 'boolean'
+        ? (existingArticle.readLaterAt ?? null)
+        : fetchedArticle.readLaterAt,
+    isArchived:
+      typeof existingArticle.isArchived === 'boolean'
+        ? existingArticle.isArchived
+        : fetchedArticle.isArchived,
+    archivedAt:
+      typeof existingArticle.isArchived === 'boolean'
+        ? (existingArticle.archivedAt ?? null)
+        : fetchedArticle.archivedAt,
+  };
+}
+
 function mergeArticleIntoCollections(
   state: Pick<AppState, 'articles' | 'articleDetailCache' | 'selectedView' | 'articleSnapshotCache'>,
   article: Article,
@@ -356,19 +382,25 @@ function mergeArticleIntoCollections(
   const existingArticle = state.articles.find((item) => item.id === article.id);
   const cachedArticlesForFeed = state.articleSnapshotCache[article.feedId] ?? [];
   const existingCachedArticle = cachedArticlesForFeed.find((item) => item.id === article.id);
+  const mergedArticle = preserveLocalWorkflowState(
+    article,
+    existingArticle ?? state.articleDetailCache[article.id] ?? existingCachedArticle,
+  );
   const shouldRevealArticleInVisibleFeed =
     state.selectedView === article.feedId && !existingArticle;
 
   const nextVisibleArticles = existingArticle
-    ? state.articles.map((item) => (item.id === article.id ? { ...item, ...article } : item))
+    ? state.articles.map((item) => (item.id === article.id ? { ...item, ...mergedArticle } : item))
     : shouldRevealArticleInVisibleFeed
-      ? sortArticlesByPublishedAtDesc([...state.articles, article])
+      ? sortArticlesByPublishedAtDesc([...state.articles, mergedArticle])
       : state.articles;
 
   const nextFeedSnapshotArticles = existingCachedArticle
-    ? cachedArticlesForFeed.map((item) => (item.id === article.id ? { ...item, ...article } : item))
+    ? cachedArticlesForFeed.map((item) =>
+        item.id === article.id ? { ...item, ...mergedArticle } : item,
+      )
     : state.selectedView === article.feedId
-      ? sortArticlesByPublishedAtDesc([...cachedArticlesForFeed, article])
+      ? sortArticlesByPublishedAtDesc([...cachedArticlesForFeed, mergedArticle])
       : cachedArticlesForFeed;
   const shouldWriteFeedSnapshotCache =
     existingCachedArticle !== undefined || state.selectedView === article.feedId;
@@ -377,7 +409,7 @@ function mergeArticleIntoCollections(
     articles: nextVisibleArticles,
     articleDetailCache: {
       ...state.articleDetailCache,
-      [article.id]: article,
+      [article.id]: mergedArticle,
     },
     articleSnapshotCache: shouldWriteFeedSnapshotCache
       ? {

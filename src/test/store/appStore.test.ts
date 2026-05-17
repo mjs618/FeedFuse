@@ -116,6 +116,53 @@ function createSnapshotArticle(id: string, feedId: string, title: string) {
   };
 }
 
+function createArticleDetailDto(
+  id: string,
+  feedId: string,
+  title: string,
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    id,
+    feedId,
+    dedupeKey: `guid:${id}`,
+    title,
+    titleOriginal: title,
+    titleZh: null,
+    link: `https://example.com/articles/${id}`,
+    author: null,
+    publishedAt: '2026-03-09T10:00:00.000Z',
+    contentHtml: `<p>${title}</p>`,
+    contentFullHtml: null,
+    contentFullFetchedAt: null,
+    contentFullError: null,
+    contentFullSourceUrl: null,
+    aiSummary: null,
+    aiSummaryModel: null,
+    aiSummarizedAt: null,
+    aiSummarySession: null,
+    aiTranslationBilingualHtml: null,
+    aiTranslationZhHtml: null,
+    aiTranslationModel: null,
+    aiTranslatedAt: null,
+    summary: `${title} summary`,
+    filterStatus: 'passed' as const,
+    isFiltered: false,
+    filteredBy: [],
+    isRead: false,
+    readAt: null,
+    isReadLater: false,
+    readLaterAt: null,
+    isArchived: false,
+    archivedAt: null,
+    isStarred: false,
+    starredAt: null,
+    bodyTranslationEligible: false,
+    bodyTranslationBlockedReason: null,
+    ...overrides,
+  };
+}
+
 function createSnapshotPage(input: {
   feeds?: ReturnType<typeof createSnapshotFeed>[];
   items: ReturnType<typeof createSnapshotArticle>[];
@@ -455,6 +502,95 @@ describe('appStore api integration', () => {
       actionKey: 'article.archive',
       context: { archived: false },
     });
+  });
+
+  it('keeps optimistic read-later state when a stale detail fetch resolves later', async () => {
+    const detailResponse = createDeferred<Response>();
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/articles/3001') && method === 'GET') {
+        return detailResponse.promise;
+      }
+
+      if (url.includes('/api/articles/3001') && method === 'PATCH') {
+        return jsonResponse({ ok: true, data: { updated: true } });
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    useAppStore.setState({
+      selectedView: 'all',
+      articles: [createSnapshotArticle('3001', 'feed-1', 'Read Later Target')],
+    });
+
+    const refreshPromise = useAppStore.getState().refreshArticle('3001');
+
+    useAppStore.getState().toggleReadLater('3001');
+    await flushPromises();
+
+    detailResponse.resolve(
+      jsonResponse({
+        ok: true,
+        data: createArticleDetailDto('3001', 'feed-1', 'Stale Read Later Detail', {
+          isReadLater: false,
+          readLaterAt: null,
+        }),
+      }),
+    );
+    await refreshPromise;
+
+    const article = useAppStore.getState().articles.find((item) => item.id === '3001');
+    expect(article).toMatchObject({ isReadLater: true });
+    expect(article?.readLaterAt).toEqual(expect.any(String));
+  });
+
+  it('keeps optimistic archive state when a stale detail fetch resolves later', async () => {
+    const detailResponse = createDeferred<Response>();
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/articles/3001') && method === 'GET') {
+        return detailResponse.promise;
+      }
+
+      if (url.includes('/api/articles/3001') && method === 'PATCH') {
+        return jsonResponse({ ok: true, data: { updated: true } });
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    useAppStore.setState({
+      selectedView: 'all',
+      selectedArticleId: '3001',
+      articles: [createSnapshotArticle('3001', 'feed-1', 'Archive Target')],
+    });
+
+    const refreshPromise = useAppStore.getState().refreshArticle('3001');
+
+    useAppStore.getState().archiveArticle('3001');
+    await flushPromises();
+
+    detailResponse.resolve(
+      jsonResponse({
+        ok: true,
+        data: createArticleDetailDto('3001', 'feed-1', 'Stale Archive Detail', {
+          isArchived: false,
+          archivedAt: null,
+        }),
+      }),
+    );
+    await refreshPromise;
+
+    const article = useAppStore.getState().articles.find((item) => item.id === '3001');
+    expect(article).toMatchObject({ isArchived: true });
+    expect(article?.archivedAt).toEqual(expect.any(String));
   });
 
   it('normalizes mutually exclusive feed trigger flags from snapshot dto', async () => {
