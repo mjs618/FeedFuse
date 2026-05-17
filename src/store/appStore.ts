@@ -1169,7 +1169,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const article = getArticleFromCollections(articleId, get().articles, get().articleDetailCache);
     if (!article) return;
 
-    const nextValue = !Boolean(article.isReadLater);
+    const nextValue = !article.isReadLater;
     const nextReadLaterAt = nextValue ? (article.readLaterAt ?? new Date().toISOString()) : null;
 
     set((state) =>

@@ -22,7 +22,7 @@ describe('ToastHost', () => {
       toast.success('已保存');
     });
 
-    const toastRoot = await screen.findByRole('status');
+    const toastRoot = await within(viewport).findByRole('status');
     expect(toastRoot.className).toContain(
       'max-w-[min(var(--layout-notification-viewport-max-width),calc(100vw-1rem))]',
     );
