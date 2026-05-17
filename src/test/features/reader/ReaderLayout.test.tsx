@@ -591,7 +591,7 @@ describe('ReaderLayout', () => {
     fireEvent.keyDown(window, { key: '?', shiftKey: true });
     expect(screen.getByRole('dialog', { name: '快捷键' })).toBeInTheDocument();
 
-    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.keyDown(window, { key: '?', shiftKey: true });
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: '快捷键' })).not.toBeInTheDocument();
     });
@@ -619,13 +619,17 @@ describe('ReaderLayout', () => {
     await act(async () => {
       fireEvent.keyDown(window, { key: 'j' });
       fireEvent.keyDown(window, { key: 's' });
-      fireEvent.keyDown(window, { key: '?', shiftKey: true });
       await Promise.resolve();
     });
 
     expect(useAppStore.getState().selectedArticleId).toBe('article-1');
     expect(toggleStar).not.toHaveBeenCalled();
     expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: '?', shiftKey: true });
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
   });
 
   it('suppresses reader action shortcuts while any dialog is open', async () => {

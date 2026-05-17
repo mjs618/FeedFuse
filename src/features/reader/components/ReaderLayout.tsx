@@ -302,15 +302,22 @@ export default function ReaderLayout({ renderedAt, initialSelectedView }: Reader
         return;
       }
 
-      const overlayOpen =
-        shortcutHelpOpen || searchOpen || settingsOpen || feedSheetOpen || hasOpenDialog();
-      if (overlayOpen || isDialogShortcutTarget(event.target)) {
+      const actionSuppressingOverlayOpen =
+        searchOpen ||
+        settingsOpen ||
+        feedSheetOpen ||
+        hasOpenDialog() ||
+        isDialogShortcutTarget(event.target);
+
+      if (event.key === '?') {
+        if (shortcutHelpOpen || !actionSuppressingOverlayOpen) {
+          event.preventDefault();
+          setShortcutHelpOpen((open) => !open);
+        }
         return;
       }
 
-      if (event.key === '?') {
-        event.preventDefault();
-        setShortcutHelpOpen(true);
+      if (shortcutHelpOpen || actionSuppressingOverlayOpen) {
         return;
       }
 
