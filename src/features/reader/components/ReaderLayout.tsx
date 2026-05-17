@@ -304,8 +304,8 @@ export default function ReaderLayout({ renderedAt, initialSelectedView }: Reader
         isDialogShortcutTarget(event.target);
 
       if ((event.metaKey || event.ctrlKey) && key === GLOBAL_SEARCH_SHORTCUT_KEY) {
-        event.preventDefault();
         if (!actionSuppressingOverlayOpen) {
+          event.preventDefault();
           setSearchOpen(true);
         }
         return;

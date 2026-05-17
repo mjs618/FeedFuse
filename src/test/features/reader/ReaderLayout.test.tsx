@@ -464,14 +464,24 @@ describe('ReaderLayout', () => {
     expect(screen.getByLabelText('返回文章列表')).toBeInTheDocument();
   });
 
-  it('opens global search with cmd+f and ctrl+f', () => {
+  it('opens global search with cmd+f and ctrl+f', async () => {
     resetSettingsStore();
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
 
     const { unmount } = renderWithNotifications();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 
-    fireEvent.keyDown(window, { key: 'f', metaKey: true });
+    const metaFindEvent = new KeyboardEvent('keydown', {
+      key: 'f',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    await act(async () => {
+      window.dispatchEvent(metaFindEvent);
+      await Promise.resolve();
+    });
+    expect(metaFindEvent.defaultPrevented).toBe(true);
     expect(screen.getByRole('dialog')).toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText('关闭全局搜索'));
@@ -479,7 +489,17 @@ describe('ReaderLayout', () => {
 
     unmount();
     renderWithNotifications();
-    fireEvent.keyDown(window, { key: 'f', ctrlKey: true });
+    const ctrlFindEvent = new KeyboardEvent('keydown', {
+      key: 'f',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    await act(async () => {
+      window.dispatchEvent(ctrlFindEvent);
+      await Promise.resolve();
+    });
+    expect(ctrlFindEvent.defaultPrevented).toBe(true);
     expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 
@@ -687,13 +707,21 @@ describe('ReaderLayout', () => {
     document.body.appendChild(alertDialog);
 
     try {
+      const ctrlFindEvent = new KeyboardEvent('keydown', {
+        key: 'f',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+
       await act(async () => {
-        fireEvent.keyDown(window, { key: 'f', ctrlKey: true });
+        window.dispatchEvent(ctrlFindEvent);
         fireEvent.keyDown(window, { key: 'j' });
         fireEvent.keyDown(window, { key: 's' });
         await Promise.resolve();
       });
 
+      expect(ctrlFindEvent.defaultPrevented).toBe(false);
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
       expect(useAppStore.getState().selectedArticleId).toBe('article-1');
       expect(toggleStar).not.toHaveBeenCalled();
