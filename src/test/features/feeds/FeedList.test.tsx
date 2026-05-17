@@ -55,7 +55,7 @@ import FeedList from '../../../features/feeds/components/FeedList';
 import { ToastHost } from '../../../features/toast/components/ToastHost';
 import { useAppStore } from '../../../store/appStore';
 import { READER_PANE_ACTIVE_ITEM_CLASS_NAME } from '@/lib/ui/designSystem';
-import { AI_DIGEST_VIEW_ID } from '@/lib/reader/view';
+import { AI_DIGEST_VIEW_ID, ARCHIVED_VIEW_ID, READ_LATER_VIEW_ID } from '@/lib/reader/view';
 
 const LEFT_RAIL_UNREAD_BADGE_CLASS_NAME =
   'bg-[color-mix(in_oklab,var(--color-background)_86%,white_14%)]';
@@ -703,22 +703,28 @@ describe('FeedList manage', () => {
     renderWithNotifications();
 
     const starredArticlesButton = screen.getByRole('button', { name: '收藏文章' });
+    const readLaterArticlesButton = screen.getByRole('button', { name: '稍后读' });
+    const archivedArticlesButton = screen.getByRole('button', { name: '归档' });
     const aiDigestArticlesButton = screen.getByRole('button', { name: '智能报告' });
     const categoryButton = screen.getByRole('button', { name: /未分类/ });
     const feedButton = screen.getByRole('button', { name: /My Feed.*2/ });
 
     expect(starredArticlesButton.className).toContain('hover:bg-[var(--reader-pane-hover)]');
+    expect(readLaterArticlesButton.className).toContain('hover:bg-[var(--reader-pane-hover)]');
+    expect(archivedArticlesButton.className).toContain('hover:bg-[var(--reader-pane-hover)]');
     expect(aiDigestArticlesButton.className).toContain('hover:bg-[var(--reader-pane-hover)]');
     expect(categoryButton.className).toContain('hover:bg-[var(--reader-pane-hover)]');
     expect(feedButton.className).toContain('hover:bg-[var(--reader-pane-hover)]');
     expect(screen.queryByRole('button', { name: '未读文章' })).not.toBeInTheDocument();
   });
 
-  it('renders smart views in 全部文章、收藏文章、智能报告 order', () => {
+  it('renders smart views in 全部文章、收藏文章、稍后读、归档、智能报告 order', () => {
     renderWithNotifications();
 
     const allArticlesButton = screen.getByRole('button', { name: '全部文章' });
     const starredArticlesButton = screen.getByRole('button', { name: '收藏文章' });
+    const readLaterArticlesButton = screen.getByRole('button', { name: '稍后读' });
+    const archivedArticlesButton = screen.getByRole('button', { name: '归档' });
     const aiDigestArticlesButton = screen.getByRole('button', { name: '智能报告' });
 
     expect(screen.queryByRole('button', { name: '未读文章' })).not.toBeInTheDocument();
@@ -726,8 +732,81 @@ describe('FeedList manage', () => {
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
     expect(
-      starredArticlesButton.compareDocumentPosition(aiDigestArticlesButton) & Node.DOCUMENT_POSITION_FOLLOWING,
+      starredArticlesButton.compareDocumentPosition(readLaterArticlesButton) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(
+      readLaterArticlesButton.compareDocumentPosition(archivedArticlesButton) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(
+      archivedArticlesButton.compareDocumentPosition(aiDigestArticlesButton) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it('shows read-later and archived smart view counts from article state', () => {
+    useAppStore.setState((state) => ({
+      ...state,
+      articles: [
+        {
+          id: 'read-later-1',
+          feedId: 'feed-1',
+          title: 'Read later A',
+          content: '',
+          summary: '',
+          publishedAt: '',
+          link: '',
+          isRead: true,
+          isStarred: false,
+          isReadLater: true,
+          isArchived: false,
+        },
+        {
+          id: 'read-later-2',
+          feedId: 'feed-1',
+          title: 'Read later B',
+          content: '',
+          summary: '',
+          publishedAt: '',
+          link: '',
+          isRead: true,
+          isStarred: false,
+          isReadLater: true,
+          isArchived: false,
+        },
+        {
+          id: 'archived-read-later',
+          feedId: 'feed-1',
+          title: 'Archived read later',
+          content: '',
+          summary: '',
+          publishedAt: '',
+          link: '',
+          isRead: true,
+          isStarred: false,
+          isReadLater: true,
+          isArchived: true,
+        },
+        {
+          id: 'archived-1',
+          feedId: 'feed-1',
+          title: 'Archived',
+          content: '',
+          summary: '',
+          publishedAt: '',
+          link: '',
+          isRead: true,
+          isStarred: false,
+          isArchived: true,
+        },
+      ],
+    }));
+
+    renderWithNotifications();
+
+    const readLaterArticlesButton = screen.getByRole('button', { name: '稍后读' });
+    const archivedArticlesButton = screen.getByRole('button', { name: '归档' });
+
+    expect(within(readLaterArticlesButton).getByText('2')).toBeInTheDocument();
+    expect(within(archivedArticlesButton).getByText('2')).toBeInTheDocument();
   });
 
   it('shows unread badges for 全部文章 and 智能报告 smart views', () => {
@@ -896,6 +975,27 @@ describe('FeedList manage', () => {
 
     await waitFor(() => {
       expect(useAppStore.getState().selectedView).toBe(AI_DIGEST_VIEW_ID);
+    });
+  });
+
+  it('switches to read-later and archived smart views after click', async () => {
+    useAppStore.setState({
+      selectedView: 'all',
+      selectedArticleId: null,
+    });
+
+    renderWithNotifications();
+
+    fireEvent.click(screen.getByRole('button', { name: '稍后读' }));
+
+    await waitFor(() => {
+      expect(useAppStore.getState().selectedView).toBe(READ_LATER_VIEW_ID);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '归档' }));
+
+    await waitFor(() => {
+      expect(useAppStore.getState().selectedView).toBe(ARCHIVED_VIEW_ID);
     });
   });
 

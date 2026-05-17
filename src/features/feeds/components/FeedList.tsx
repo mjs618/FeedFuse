@@ -1,5 +1,5 @@
 import dynamic from 'next/dynamic';
-import { AlertCircle, ArrowDown, ArrowUp, ChevronDown, ChevronRight, FileText, FolderTree, Languages, Newspaper, PencilLine, Plus, Power, Sparkles, Star, Trash2 } from 'lucide-react';
+import { AlertCircle, Archive, ArrowDown, ArrowUp, ChevronDown, ChevronRight, Clock3, FileText, FolderTree, Languages, Newspaper, PencilLine, Plus, Power, Sparkles, Star, Trash2 } from 'lucide-react';
 import { type KeyboardEvent, useMemo, useState } from 'react';
 import { useAppStore } from '../../../store/appStore';
 import type { ViewType } from '../../../types';
@@ -37,7 +37,7 @@ import {
 } from '@/lib/ui/designSystem';
 import { runImmediateOperation } from '../../notifications/userOperationNotifier';
 import { cn } from '@/lib/utils';
-import { AI_DIGEST_VIEW_ID } from '@/lib/reader/view';
+import { AI_DIGEST_VIEW_ID, ARCHIVED_VIEW_ID, READ_LATER_VIEW_ID } from '@/lib/reader/view';
 import { useHydratedSelectedView } from '../../../hooks';
 
 const uncategorizedName = '未分类';
@@ -77,6 +77,7 @@ export default function FeedList({
 }: FeedListProps) {
   const appCategories = useAppStore((state) => state.categories);
   const feeds = useAppStore((state) => state.feeds);
+  const articles = useAppStore((state) => state.articles);
   const loadSnapshot = useAppStore((state) => state.loadSnapshot);
   const showFilteredByFeedId = useAppStore((state) => state.showFilteredByFeedId);
   const selectedView = useAppStore((state) => state.selectedView);
@@ -111,10 +112,20 @@ export default function FeedList({
       ),
     [feeds],
   );
+  const readLaterCount = useMemo(
+    () => articles.filter((article) => article.isReadLater && !article.isArchived).length,
+    [articles],
+  );
+  const archivedCount = useMemo(
+    () => articles.filter((article) => article.isArchived).length,
+    [articles],
+  );
   // Smart views derive counts from the same unread source data as the concrete feed rows.
   const smartViews = [
     { id: 'all', name: '全部文章', Icon: Newspaper, unreadCount: allArticlesUnreadCount },
     { id: 'starred', name: '收藏文章', Icon: Star, unreadCount: 0 },
+    { id: READ_LATER_VIEW_ID, name: '稍后读', Icon: Clock3, unreadCount: readLaterCount },
+    { id: ARCHIVED_VIEW_ID, name: '归档', Icon: Archive, unreadCount: archivedCount },
     { id: AI_DIGEST_VIEW_ID, name: '智能报告', Icon: Sparkles, unreadCount: aiDigestUnreadCount },
   ] as const;
 

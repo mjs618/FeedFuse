@@ -10,6 +10,8 @@ import {
   type UIEvent,
 } from "react";
 import {
+  Archive,
+  Clock3,
   Download,
   FileText,
   Languages,
@@ -96,6 +98,8 @@ export default function ArticleView({
   });
   const markAsRead = useAppStore((state) => state.markAsRead);
   const toggleStar = useAppStore((state) => state.toggleStar);
+  const toggleReadLater = useAppStore((state) => state.toggleReadLater);
+  const archiveArticle = useAppStore((state) => state.archiveArticle);
   const refreshArticle = useAppStore((state) => state.refreshArticle);
   const openArticleInReader = useAppStore((state) => state.openArticleInReader);
   const general = useSettingsStore((state) => state.persistedSettings.general);
@@ -472,6 +476,8 @@ export default function ArticleView({
   const aiTranslationButtonDisabled = isAiDigestArticle;
   const aiSummaryButtonDisabled = feedFullTextOnOpenEnabled && fulltextPending;
   const showDesktopStarButton = Boolean(article);
+  const showDesktopReadLaterButton = Boolean(article);
+  const showDesktopArchiveButton = Boolean(article);
   const showDesktopMarkdownExportButton = Boolean(article);
   const showDesktopFulltextButton = Boolean(article) && !fulltextButtonDisabled;
   const showDesktopTranslationButton =
@@ -524,6 +530,16 @@ export default function ArticleView({
     });
   }
 
+  function onReadLaterButtonClick() {
+    if (!article?.id) return;
+    toggleReadLater(article.id);
+  }
+
+  function onArchiveButtonClick() {
+    if (!article?.id) return;
+    archiveArticle(article.id);
+  }
+
   async function onAiDigestSourceClick(source: ArticleAiDigestSource) {
     // Preserve the current digest article URL entry so browser back can return to it.
     await openArticleInReader({
@@ -574,6 +590,21 @@ export default function ArticleView({
               label={article?.isStarred ? "已收藏" : "收藏"}
               pressed={Boolean(article?.isStarred)}
               onClick={article ? () => toggleStar(article.id) : undefined}
+            />
+          ) : null}
+          {showDesktopReadLaterButton ? (
+            <ReaderToolbarIconButton
+              icon={Clock3}
+              label={article?.isReadLater ? "移出稍后读" : "稍后读"}
+              pressed={Boolean(article?.isReadLater)}
+              onClick={article ? onReadLaterButtonClick : undefined}
+            />
+          ) : null}
+          {showDesktopArchiveButton ? (
+            <ReaderToolbarIconButton
+              icon={Archive}
+              label="归档文章"
+              onClick={article ? onArchiveButtonClick : undefined}
             />
           ) : null}
           {showDesktopFulltextButton ? (
@@ -967,6 +998,29 @@ export default function ArticleView({
                   >
                     <Star fill={article.isStarred ? "currentColor" : "none"} />
                     <span>{article.isStarred ? "已收藏" : "收藏"}</span>
+                  </Button>
+
+                  <Button
+                    type="button"
+                    onClick={onReadLaterButtonClick}
+                    variant={article.isReadLater ? "default" : "secondary"}
+                    size="compact"
+                    className="cursor-pointer"
+                    aria-pressed={article.isReadLater || undefined}
+                  >
+                    <Clock3 />
+                    <span>{article.isReadLater ? "移出稍后读" : "稍后读"}</span>
+                  </Button>
+
+                  <Button
+                    type="button"
+                    onClick={onArchiveButtonClick}
+                    variant="secondary"
+                    size="compact"
+                    className="cursor-pointer"
+                  >
+                    <Archive />
+                    <span>归档文章</span>
                   </Button>
 
                   <Button

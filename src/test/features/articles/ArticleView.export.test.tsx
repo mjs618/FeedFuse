@@ -1,6 +1,6 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type ApiClientModule = typeof import('@/lib/api/apiClient');
 type AppStoreModule = typeof import('../../../store/appStore');
@@ -133,10 +133,22 @@ describe('ArticleView markdown export', () => {
     });
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
   it('shows the export action in the desktop toolbar when an article is selected', async () => {
     render(<ArticleView />);
 
     expect(await screen.findByRole('button', { name: '导出文章' })).toBeInTheDocument();
+  });
+
+  it('shows read-later and archive actions in the desktop toolbar when an article is selected', async () => {
+    render(<ArticleView />);
+
+    expect(await screen.findByRole('button', { name: '稍后读' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '归档文章' })).toBeInTheDocument();
   });
 
   it('does not show the export action when no article is selected', async () => {
@@ -178,5 +190,40 @@ describe('ArticleView markdown export', () => {
     expect(createObjectURL).toHaveBeenCalledTimes(1);
     expect(anchorClick).toHaveBeenCalledTimes(1);
     expect(revokeObjectURL).toHaveBeenCalledTimes(1);
+  });
+
+  it('toggles read-later for the selected article from the desktop toolbar', async () => {
+    const toggleReadLater = vi.fn();
+    useAppStore.setState({ toggleReadLater });
+
+    render(<ArticleView />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '稍后读' }));
+
+    expect(toggleReadLater).toHaveBeenCalledWith('article-1');
+  });
+
+  it('archives the selected article from the desktop toolbar', async () => {
+    const archiveArticle = vi.fn();
+    useAppStore.setState({ archiveArticle });
+
+    render(<ArticleView />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '归档文章' }));
+
+    expect(archiveArticle).toHaveBeenCalledWith('article-1');
+  });
+
+  it('marks read-later toolbar action pressed and labels removal when already saved', async () => {
+    useAppStore.setState((state) => ({
+      articles: state.articles.map((article) =>
+        article.id === 'article-1' ? { ...article, isReadLater: true } : article,
+      ),
+    }));
+
+    render(<ArticleView />);
+
+    const readLaterButton = await screen.findByRole('button', { name: '移出稍后读' });
+    expect(readLaterButton).toHaveAttribute('aria-pressed', 'true');
   });
 });
