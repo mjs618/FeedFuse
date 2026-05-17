@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Article, Feed } from '../../../types';
-import { AI_DIGEST_VIEW_ID } from '@/lib/reader/view';
+import { AI_DIGEST_VIEW_ID, ARCHIVED_VIEW_ID, READ_LATER_VIEW_ID } from '@/lib/reader/view';
 import {
   ARTICLE_CARD_ROW_HEIGHT,
   ARTICLE_LIST_ROW_HEIGHT,
@@ -113,6 +113,47 @@ describe('buildArticleListDerivedState', () => {
     });
     expect(Array.from(result.previewImageCandidates.entries())).toEqual([
       ['digest-1:https://img.example/preview.jpg', 'https://img.example/preview.jpg'],
+    ]);
+  });
+
+  it('filters read-later smart view to active read-later articles', () => {
+    const result = buildArticleListDerivedState({
+      articles: [
+        createArticle({ id: 'read-later-1', isReadLater: true, isArchived: false }),
+        createArticle({ id: 'archived-read-later', isReadLater: true, isArchived: true }),
+        createArticle({ id: 'regular-1', isReadLater: false, isArchived: false }),
+      ],
+      selectedView: READ_LATER_VIEW_ID,
+      selectedArticleId: null,
+      displayMode: 'card',
+      showUnreadFilterActive: false,
+      retainedVisibleArticleIds: new Set(),
+      aiDigestFeedIds: new Set(),
+      referenceTime: new Date('2026-02-25T12:00:00.000Z'),
+    });
+
+    expect(result.viewScopedArticles.map((article) => article.id)).toEqual(['read-later-1']);
+  });
+
+  it('filters archived smart view to archived articles', () => {
+    const result = buildArticleListDerivedState({
+      articles: [
+        createArticle({ id: 'archived-1', isArchived: true }),
+        createArticle({ id: 'archived-read-later', isReadLater: true, isArchived: true }),
+        createArticle({ id: 'regular-1', isReadLater: true, isArchived: false }),
+      ],
+      selectedView: ARCHIVED_VIEW_ID,
+      selectedArticleId: null,
+      displayMode: 'card',
+      showUnreadFilterActive: false,
+      retainedVisibleArticleIds: new Set(),
+      aiDigestFeedIds: new Set(),
+      referenceTime: new Date('2026-02-25T12:00:00.000Z'),
+    });
+
+    expect(result.viewScopedArticles.map((article) => article.id)).toEqual([
+      'archived-1',
+      'archived-read-later',
     ]);
   });
 
