@@ -419,6 +419,7 @@ describe('appStore api integration', () => {
       isArchived: true,
     });
 
+    expect(toastSuccessMock).toHaveBeenCalledTimes(1);
     expect(toastSuccessMock).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({
