@@ -28,6 +28,7 @@ out
 # Local workspace and test artifacts
 .worktrees
 artifacts/
+.playwright-cli/
 .pnpm-store
 .serena
 

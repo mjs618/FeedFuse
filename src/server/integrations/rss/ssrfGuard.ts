@@ -6,6 +6,7 @@ const RESERVED_HOSTNAME_SUFFIXES = ['.localhost', '.local', '.test', '.example',
 
 export interface SafeExternalUrlOptions {
   allowUnresolvedHostname?: boolean;
+  allowProxyResolvedHostname?: boolean;
 }
 
 function isAllowedIp(ip: string, options?: { allowLoopback?: boolean }): boolean {
@@ -31,6 +32,12 @@ function looksLikePublicHostname(hostname: string): boolean {
   return !RESERVED_HOSTNAME_SUFFIXES.some(
     (suffix) => hostname === suffix.slice(1) || hostname.endsWith(suffix),
   );
+}
+
+function isProxyPlaceholderIp(ip: string): boolean {
+  if (!ipaddr.IPv4.isValid(ip)) return false;
+  const [first, second] = ip.split('.').map((part) => Number(part));
+  return first === 198 && (second === 18 || second === 19);
 }
 
 export async function isSafeExternalUrl(
@@ -69,7 +76,15 @@ export async function isSafeExternalUrl(
     const addresses = await lookup(hostname, { all: true, verbatim: true });
     if (!addresses.length) return false;
     for (const record of addresses) {
-      if (!isAllowedIp(record.address)) return false;
+      if (isAllowedIp(record.address)) continue;
+      if (
+        options?.allowProxyResolvedHostname === true &&
+        looksLikePublicHostname(hostname) &&
+        isProxyPlaceholderIp(record.address)
+      ) {
+        continue;
+      }
+      return false;
     }
     return true;
   } catch {

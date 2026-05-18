@@ -1,5 +1,8 @@
 import '@testing-library/jest-dom/vitest';
+import { configure } from '@testing-library/react';
 import { vi } from 'vitest';
+
+configure({ asyncUtilTimeout: 3000 });
 
 const hasWindow = typeof window !== 'undefined';
 

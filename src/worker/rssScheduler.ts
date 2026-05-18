@@ -1,3 +1,5 @@
+import { isSafeExternalUrl } from '@/server/integrations/rss/ssrfGuard';
+
 export function isFeedDue(
   input: { lastFetchedAt: string | null; fetchIntervalMinutes: number },
   now: Date,
@@ -9,5 +11,12 @@ export function isFeedDue(
   if (Number.isNaN(lastFetchedAt.getTime())) return true;
 
   return now.getTime() >= lastFetchedAt.getTime() + input.fetchIntervalMinutes * 60 * 1000;
+}
+
+export function isFeedUrlSafeForFetch(url: string): Promise<boolean> {
+  return isSafeExternalUrl(url, {
+    allowProxyResolvedHostname: true,
+    allowUnresolvedHostname: true,
+  });
 }
 

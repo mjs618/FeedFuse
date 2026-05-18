@@ -1,5 +1,15 @@
-import { describe, expect, it } from 'vitest';
-import { isFeedDue } from '../../worker/rssScheduler';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('node:dns/promises', () => {
+  const lookup = vi.fn();
+  return {
+    lookup,
+    default: { lookup },
+  };
+});
+
+import { lookup } from 'node:dns/promises';
+import { isFeedDue, isFeedUrlSafeForFetch } from '../../worker/rssScheduler';
 
 describe('isFeedDue', () => {
   it('returns true when fetchIntervalMinutes is non-positive', () => {
@@ -24,6 +34,32 @@ describe('isFeedDue', () => {
     const now = new Date('2026-03-01T01:00:00.000Z');
     const lastFetchedAt = new Date('2026-03-01T00:00:00.000Z').toISOString();
     expect(isFeedDue({ lastFetchedAt, fetchIntervalMinutes: 60 }, now)).toBe(true);
+  });
+});
+
+describe('isFeedUrlSafeForFetch', () => {
+  const lookupMock = vi.mocked(lookup);
+
+  beforeEach(() => {
+    lookupMock.mockReset();
+  });
+
+  it('allows public-looking feed hostnames when local DNS lookup fails', async () => {
+    lookupMock.mockRejectedValue(new Error('getaddrinfo ENOTFOUND openai.com'));
+
+    await expect(isFeedUrlSafeForFetch('https://openai.com/news/rss.xml')).resolves.toBe(true);
+  });
+
+  it('allows public feed hostnames that resolve to proxy placeholder addresses', async () => {
+    lookupMock.mockResolvedValue([{ address: '198.18.0.132', family: 4 }]);
+
+    await expect(isFeedUrlSafeForFetch('https://openai.com/news/rss.xml')).resolves.toBe(true);
+  });
+
+  it('still rejects reserved hostnames when local DNS lookup fails', async () => {
+    lookupMock.mockRejectedValue(new Error('getaddrinfo ENOTFOUND internal.test'));
+
+    await expect(isFeedUrlSafeForFetch('https://internal.test/feed')).resolves.toBe(false);
   });
 });
 

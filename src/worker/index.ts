@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import process from 'node:process';
 import type { PgBoss } from 'pg-boss';
+import { loadRootEnvFileIfPresent } from '@/server/infra/loadRootEnv';
 import { getPool } from '@/server/infra/db/pool';
 import {
   getFeedForFetch,
@@ -23,7 +24,6 @@ import {
 import { fetchFeedXml } from '@/server/integrations/rss/fetchFeedXml';
 import { parseFeed } from '@/server/integrations/rss/parseFeed';
 import { sanitizeContent } from '@/server/integrations/rss/sanitizeContent';
-import { isSafeExternalUrl } from '@/server/integrations/rss/ssrfGuard';
 import { fetchFulltextAndStore } from '@/server/integrations/fulltext/fetchFulltextAndStore';
 import { translateSegmentsInBatches } from '@/server/integrations/ai/bilingualHtmlTranslator';
 import {
@@ -56,7 +56,7 @@ import { mapFeedFetchError } from '@/server/domains/feeds/tasks/feedFetchErrorMa
 import { normalizePersistedSettings } from '@/features/settings/settingsSchema';
 import { registerWorkers } from '@/worker/workerRegistry';
 import { buildFeedFetchJobData, selectFeedsForRefreshAll } from '@/worker/refreshAll';
-import { isFeedDue } from '@/worker/rssScheduler';
+import { isFeedDue, isFeedUrlSafeForFetch } from '@/worker/rssScheduler';
 import { runArticleTaskWithStatus } from '@/worker/articleTaskStatus';
 import { runImmersiveTranslateSession } from '@/worker/immersiveTranslateWorker';
 import { runAiSummaryStreamWorker } from '@/worker/aiSummaryStreamWorker';
@@ -69,6 +69,8 @@ import {
   completeFeedRefreshRunItem,
   markFeedRefreshRunItemRunning,
 } from '@/server/domains/feeds/services/feedRefreshRunService';
+
+loadRootEnvFileIfPresent();
 
 const DEFAULT_TRANSLATION_MODEL = 'gpt-4o-mini';
 const DEFAULT_TRANSLATION_API_BASE_URL = 'https://api.openai.com/v1';
@@ -140,7 +142,7 @@ async function fetchAndIngestFeed(
     return { inserted: 0, errorMessage: null };
   }
 
-  if (!(await isSafeExternalUrl(feed.url))) {
+  if (!(await isFeedUrlSafeForFetch(feed.url))) {
     const mapped = mapFeedFetchError('Unsafe URL');
     await recordFeedFetchResult(pool, feedId, {
       status: null,

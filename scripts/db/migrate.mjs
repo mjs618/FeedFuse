@@ -3,6 +3,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
+import { loadEnvFileIfPresent } from './loadEnvFile.mjs';
 
 const { Client } = pg;
 
@@ -11,6 +12,8 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '../..');
 // 目录重构后，数据库迁移文件统一归入 infra 层。
 const migrationsDir = path.join(repoRoot, 'src/server/infra/db/migrations');
+
+loadEnvFileIfPresent(path.join(repoRoot, '.env'));
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {

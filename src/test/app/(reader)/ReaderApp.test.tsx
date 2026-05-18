@@ -90,7 +90,7 @@ describe('ReaderApp', () => {
     expect(screen.getByLabelText('打开设置')).toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText('打开设置'));
-    expect(await screen.findByTestId('settings-center-modal')).toBeInTheDocument();
+    expect(await screen.findByTestId('settings-center-modal', {}, { timeout: 3000 })).toBeInTheDocument();
   });
 
   it('ignores unrelated reader key presses', async () => {

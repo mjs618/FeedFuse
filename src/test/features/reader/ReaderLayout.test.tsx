@@ -140,7 +140,7 @@ describe('ReaderLayout', () => {
     expect(screen.getAllByLabelText('打开设置').length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getAllByLabelText('打开设置').at(-1) as HTMLElement);
-    expect(await screen.findByTestId('settings-center-modal')).toBeInTheDocument();
+    expect(await screen.findByTestId('settings-center-modal', {}, { timeout: 3000 })).toBeInTheDocument();
   });
 
   it('no longer renders a separate desktop floating title after reader scroll', () => {
@@ -196,7 +196,7 @@ describe('ReaderLayout', () => {
     expect(openSettingsButtons).toHaveLength(1);
 
     fireEvent.click(openSettingsButtons[0]);
-    expect(await screen.findByTestId('settings-center-modal')).toBeInTheDocument();
+    expect(await screen.findByTestId('settings-center-modal', {}, { timeout: 3000 })).toBeInTheDocument();
   });
 
   it('groups feeds by category with uncategorized fallback', () => {

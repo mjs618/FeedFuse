@@ -8,6 +8,7 @@ const isSafeExternalUrlMock = vi.fn();
 const sanitizeContentMock = vi.fn();
 const extractFulltextMock = vi.fn();
 const fetchHtmlMock = vi.fn();
+const resolveGoogleNewsArticleUrlMock = vi.fn();
 
 vi.mock('@/server/domains/articles/repositories/articlesRepo', () => ({
   getArticleById: (...args: unknown[]) => getArticleByIdMock(...args),
@@ -33,6 +34,10 @@ vi.mock('@/server/integrations/fulltext/extractFulltext', () => ({
 
 vi.mock('@/server/infra/http/externalHttpClient', () => ({
   fetchHtml: (...args: unknown[]) => fetchHtmlMock(...args),
+}));
+
+vi.mock('@/server/integrations/fulltext/googleNewsUrlResolver', () => ({
+  resolveGoogleNewsArticleUrl: (...args: unknown[]) => resolveGoogleNewsArticleUrlMock(...args),
 }));
 
 const challengeUrl =
@@ -70,6 +75,8 @@ describe('fetchFulltextAndStore', () => {
     sanitizeContentMock.mockReset();
     extractFulltextMock.mockReset();
     fetchHtmlMock.mockReset();
+    resolveGoogleNewsArticleUrlMock.mockReset();
+    resolveGoogleNewsArticleUrlMock.mockResolvedValue(null);
     vi.unstubAllGlobals();
   });
 
@@ -108,13 +115,70 @@ describe('fetchFulltextAndStore', () => {
           context: {
             articleId: 'article-1',
             articleLink: 'https://example.com/a',
+            fetchUrl: 'https://example.com/a',
           },
         },
       }),
     );
+    expect(isSafeExternalUrlMock).toHaveBeenCalledWith('https://example.com/a', {
+      allowProxyResolvedHostname: true,
+      allowUnresolvedHostname: true,
+    });
     expect(setArticleFulltextMock).toHaveBeenCalledWith(pool, 'article-1', {
       contentFullHtml: '<p>World</p>',
       sourceUrl: 'https://example.com/a',
+    });
+    expect(setArticleFulltextErrorMock).not.toHaveBeenCalled();
+  });
+
+  it('fetches the original article when a Google News link resolves', async () => {
+    const pool = {};
+
+    getArticleByIdMock.mockResolvedValue({
+      id: 'article-1',
+      link: 'https://news.google.com/rss/articles/CBMi-example?oc=5',
+      contentFullHtml: null,
+    });
+    getAppSettingsMock.mockResolvedValue({ rssTimeoutMs: 1000, rssUserAgent: 'test-agent' });
+    isSafeExternalUrlMock.mockResolvedValue(true);
+    resolveGoogleNewsArticleUrlMock.mockResolvedValue('https://example.com/original');
+    extractFulltextMock.mockReturnValue({ contentHtml: '<main><p>Resolved</p></main>', title: null });
+    sanitizeContentMock.mockReturnValue('<p>Resolved</p>');
+
+    fetchHtmlMock.mockResolvedValue({
+      status: 200,
+      finalUrl: 'https://example.com/original',
+      contentType: 'text/html; charset=utf-8',
+      html: '<html><body><main><p>Resolved</p></main></body></html>',
+    });
+
+    const mod = (await import('@/server/integrations/fulltext/fetchFulltextAndStore')) as typeof import('@/server/integrations/fulltext/fetchFulltextAndStore');
+    await mod.fetchFulltextAndStore(pool as never, 'article-1');
+
+    expect(resolveGoogleNewsArticleUrlMock).toHaveBeenCalledWith({
+      url: 'https://news.google.com/rss/articles/CBMi-example?oc=5',
+      timeoutMs: 1000,
+      userAgent: 'test-agent',
+    });
+    expect(isSafeExternalUrlMock).toHaveBeenCalledWith('https://example.com/original', {
+      allowProxyResolvedHostname: true,
+      allowUnresolvedHostname: true,
+    });
+    expect(fetchHtmlMock).toHaveBeenCalledWith(
+      'https://example.com/original',
+      expect.objectContaining({
+        logging: expect.objectContaining({
+          context: {
+            articleId: 'article-1',
+            articleLink: 'https://news.google.com/rss/articles/CBMi-example?oc=5',
+            fetchUrl: 'https://example.com/original',
+          },
+        }),
+      }),
+    );
+    expect(setArticleFulltextMock).toHaveBeenCalledWith(pool, 'article-1', {
+      contentFullHtml: '<p>Resolved</p>',
+      sourceUrl: 'https://example.com/original',
     });
     expect(setArticleFulltextErrorMock).not.toHaveBeenCalled();
   });
@@ -175,6 +239,65 @@ describe('fetchFulltextAndStore', () => {
       error: 'Verification required',
       sourceUrl: 'https://example.com/protected',
     });
+  });
+
+  it('stores long RSS content as a fallback when fulltext fetching fails', async () => {
+    const pool = {};
+    const longRssContent = `<article>${'<p>RSS paragraph with useful article text.</p>'.repeat(80)}</article>`;
+
+    getArticleByIdMock.mockResolvedValue({
+      id: 'article-1',
+      link: 'https://example.com/protected',
+      contentHtml: longRssContent,
+      contentFullHtml: null,
+      contentFullSourceUrl: null,
+    });
+    getAppSettingsMock.mockResolvedValue({ rssTimeoutMs: 1000, rssUserAgent: 'test-agent' });
+    isSafeExternalUrlMock.mockResolvedValue(true);
+    fetchHtmlMock.mockResolvedValue({
+      status: 403,
+      finalUrl: 'https://example.com/protected',
+      contentType: 'text/html; charset=utf-8',
+      html: '<html><body>Forbidden</body></html>',
+    });
+    sanitizeContentMock.mockReturnValue('<p>RSS fallback article</p>');
+
+    const mod = (await import('@/server/integrations/fulltext/fetchFulltextAndStore')) as typeof import('@/server/integrations/fulltext/fetchFulltextAndStore');
+    await mod.fetchFulltextAndStore(pool as never, 'article-1');
+
+    expect(sanitizeContentMock).toHaveBeenCalledWith(longRssContent, {
+      baseUrl: 'https://example.com/protected',
+    });
+    expect(setArticleFulltextMock).toHaveBeenCalledWith(pool, 'article-1', {
+      contentFullHtml: '<p>RSS fallback article</p>',
+      sourceUrl: 'https://example.com/protected',
+    });
+    expect(setArticleFulltextErrorMock).not.toHaveBeenCalled();
+  });
+
+  it('stores long RSS content as a fallback when the article URL is unsafe', async () => {
+    const pool = {};
+    const longRssContent = `<article>${'<p>RSS paragraph with useful article text.</p>'.repeat(80)}</article>`;
+
+    getArticleByIdMock.mockResolvedValue({
+      id: 'article-1',
+      link: 'https://localhost/protected',
+      contentHtml: longRssContent,
+      contentFullHtml: null,
+      contentFullSourceUrl: null,
+    });
+    isSafeExternalUrlMock.mockResolvedValue(false);
+    sanitizeContentMock.mockReturnValue('<p>RSS fallback article</p>');
+
+    const mod = (await import('@/server/integrations/fulltext/fetchFulltextAndStore')) as typeof import('@/server/integrations/fulltext/fetchFulltextAndStore');
+    await mod.fetchFulltextAndStore(pool as never, 'article-1');
+
+    expect(fetchHtmlMock).not.toHaveBeenCalled();
+    expect(setArticleFulltextMock).toHaveBeenCalledWith(pool, 'article-1', {
+      contentFullHtml: '<p>RSS fallback article</p>',
+      sourceUrl: 'https://localhost/protected',
+    });
+    expect(setArticleFulltextErrorMock).not.toHaveBeenCalled();
   });
 
   it('refetches when the stored fulltext is only a verification page', async () => {

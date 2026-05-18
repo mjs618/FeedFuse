@@ -63,6 +63,28 @@ describe('ssrfGuard', () => {
     ).resolves.toBe(true);
   });
 
+  it('rejects proxy placeholder addresses by default', async () => {
+    lookupMock.mockResolvedValue([{ address: '198.18.0.132', family: 4 }]);
+    await expect(isSafeExternalUrl('https://openai.com/news/rss.xml')).resolves.toBe(false);
+  });
+
+  it('accepts public hostnames resolving to proxy placeholder addresses when explicitly allowed', async () => {
+    lookupMock.mockResolvedValue([{ address: '198.18.0.132', family: 4 }]);
+    await expect(
+      isSafeExternalUrl('https://openai.com/news/rss.xml', {
+        allowProxyResolvedHostname: true,
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it('keeps rejecting direct proxy placeholder ip urls', async () => {
+    await expect(
+      isSafeExternalUrl('https://198.18.0.132/feed', {
+        allowProxyResolvedHostname: true,
+      }),
+    ).resolves.toBe(false);
+  });
+
   it('rejects domains with any unsafe ip', async () => {
     lookupMock.mockResolvedValue([
       { address: '1.1.1.1', family: 4 },
