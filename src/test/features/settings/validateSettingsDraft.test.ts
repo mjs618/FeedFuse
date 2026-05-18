@@ -79,4 +79,23 @@ describe('validateSettingsDraft', () => {
     expect(result.valid).toBe(false);
     expect(result.errors['ai.translation.apiBaseUrl']).toBeTruthy();
   });
+
+  it('rejects Anthropic-compatible AI apiBaseUrl because requests use OpenAI chat completions', () => {
+    const draft: SettingsDraft = {
+      persisted: {
+        ...structuredClone(defaultPersistedSettings),
+        ai: {
+          ...structuredClone(defaultPersistedSettings.ai),
+          model: 'deepseek-v4-pro',
+          apiBaseUrl: 'https://api.deepseek.com/anthropic',
+        },
+      },
+      session: { ai: { apiKey: '' } },
+    };
+
+    const result = validateSettingsDraft(draft);
+
+    expect(result.valid).toBe(false);
+    expect(result.errors['ai.apiBaseUrl']).toContain('OpenAI-compatible');
+  });
 });

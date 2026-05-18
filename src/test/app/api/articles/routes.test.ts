@@ -1571,9 +1571,9 @@ describe('/api/articles', () => {
         sessionId: 'summary-session-new',
         sharedConfigFingerprint: expect.any(String),
       }),
-      expect.objectContaining({
+      {
         retryLimit: 0,
-      }),
+      },
     );
     expect(markAiSummarySessionSupersededMock).toHaveBeenCalledWith(pool, {
       sessionId: 'summary-session-old',

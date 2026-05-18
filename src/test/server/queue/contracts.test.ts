@@ -12,6 +12,15 @@ describe('queue contracts', () => {
     expect(getQueueSendOptions('ai.translate_article_zh', { articleId: 'a1' }).retryLimit).toBe(0);
   });
 
+  it('lets forced summary jobs bypass article singleton dedupe', () => {
+    expect(getQueueSendOptions('ai.summarize_article', { articleId: 'a1' })).toEqual(
+      expect.objectContaining({ singletonKey: 'a1', retryLimit: 0 }),
+    );
+    expect(getQueueSendOptions('ai.summarize_article', { articleId: 'a1', force: true })).toEqual({
+      retryLimit: 0,
+    });
+  });
+
   it('dedupes ai digest jobs via singleton keys', () => {
     expect(getQueueSendOptions('ai.digest_tick', {}).singletonKey).toBe('ai.digest_tick');
     expect(getQueueSendOptions('ai.digest_generate', { runId: 'r1' }).singletonKey).toBe('r1');

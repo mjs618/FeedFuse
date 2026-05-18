@@ -262,7 +262,7 @@ export async function POST(
     const enqueueResult = await enqueueWithResult(
       JOB_AI_SUMMARIZE,
       { articleId, sessionId: session.id, sharedConfigFingerprint },
-      getQueueSendOptions(JOB_AI_SUMMARIZE, { articleId }),
+      getQueueSendOptions(JOB_AI_SUMMARIZE, { articleId, force }),
     );
     if (enqueueResult.status !== 'enqueued') {
       return ok({ enqueued: false, reason: 'already_enqueued', sessionId: session.id });

@@ -42,6 +42,18 @@ function isValidHttpUrl(url: string): boolean {
   return parsed.protocol === 'http:' || parsed.protocol === 'https:';
 }
 
+function isAnthropicCompatibleUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.pathname
+      .split('/')
+      .filter(Boolean)
+      .some((segment) => segment.toLowerCase() === 'anthropic');
+  } catch {
+    return false;
+  }
+}
+
 function validateRss(draft: SettingsDraft, errors: Record<string, string>) {
   const sources = draft.persisted.rss?.sources;
   if (!Array.isArray(sources)) {
@@ -77,6 +89,9 @@ function validateAi(draft: SettingsDraft, errors: Record<string, string>) {
     // continue; translation config may still need validation
   } else if (!isValidUrl(apiBaseUrl)) {
     errors['ai.apiBaseUrl'] = 'API base URL must be a valid URL.';
+  } else if (isAnthropicCompatibleUrl(apiBaseUrl)) {
+    errors['ai.apiBaseUrl'] =
+      'API base URL must be OpenAI-compatible; Anthropic-compatible URLs such as /anthropic are not supported.';
   }
 
   const translation = ai?.translation;
@@ -93,6 +108,12 @@ function validateAi(draft: SettingsDraft, errors: Record<string, string>) {
 
   if (!isValidUrl(translationApiBaseUrl)) {
     errors['ai.translation.apiBaseUrl'] = 'Translation API base URL must be a valid URL.';
+    return;
+  }
+
+  if (isAnthropicCompatibleUrl(translationApiBaseUrl)) {
+    errors['ai.translation.apiBaseUrl'] =
+      'Translation API base URL must be OpenAI-compatible; Anthropic-compatible URLs such as /anthropic are not supported.';
   }
 }
 
