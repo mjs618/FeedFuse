@@ -832,6 +832,46 @@ it('enqueueArticleAiTranslate POSTs /api/articles/:id/ai-translate', async () =>
   expect(getFetchCallMethod(firstCall)).toBe('POST');
 });
 
+it('bulkPatchArticles posts selected article ids and patch', async () => {
+  let sentBodyText: string | undefined;
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    if (typeof Request !== 'undefined' && input instanceof Request) {
+      sentBodyText = await input.text();
+    }
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        data: {
+          articleIds: ['3001', '3002'],
+          patch: { isRead: true },
+          updatedCount: 2,
+        },
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+  });
+  vi.stubGlobal('fetch', fetchMock);
+
+  const { bulkPatchArticles } = await import('@/lib/api/apiClient');
+  const result = await bulkPatchArticles(['3001', '3002'], { isRead: true }, { notifyOnError: false });
+
+  const firstCall = fetchMock.mock.calls[0] ?? [];
+  expect(result).toEqual({
+    articleIds: ['3001', '3002'],
+    patch: { isRead: true },
+    updatedCount: 2,
+  });
+  expect(getFetchCallUrl(firstCall[0])).toContain('/api/articles/bulk');
+  expect(getFetchCallMethod(firstCall)).toBe('POST');
+  expect(getFetchCallHeader(firstCall, 'content-type')).toBe('application/json');
+  expect(sentBodyText).toBe(
+    JSON.stringify({
+      articleIds: ['3001', '3002'],
+      patch: { isRead: true },
+    }),
+  );
+});
+
 it('enqueueArticleFulltext sends force in request body when provided', async () => {
   let sentBodyText: string | undefined;
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {

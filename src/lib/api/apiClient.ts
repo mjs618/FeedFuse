@@ -785,9 +785,16 @@ export async function reorderCategories(
   );
 }
 
+export type ArticlePatchInput = {
+  isRead?: boolean;
+  isReadLater?: boolean;
+  isArchived?: boolean;
+  isStarred?: boolean;
+};
+
 export async function patchArticle(
   articleId: string,
-  input: { isRead?: boolean; isReadLater?: boolean; isArchived?: boolean; isStarred?: boolean },
+  input: ArticlePatchInput,
   options?: RequestApiOptions,
 ): Promise<{ updated: true }> {
   return requestApi(
@@ -796,6 +803,22 @@ export async function patchArticle(
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(input),
+    },
+    options,
+  );
+}
+
+export async function bulkPatchArticles(
+  articleIds: string[],
+  patch: ArticlePatchInput,
+  options?: RequestApiOptions,
+): Promise<{ articleIds: string[]; patch: ArticlePatchInput; updatedCount: number }> {
+  return requestApi(
+    '/api/articles/bulk',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ articleIds, patch }),
     },
     options,
   );
