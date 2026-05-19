@@ -21,6 +21,7 @@ export type UserOperationActionKey =
   | 'article.markRead'
   | 'article.toggleRead'
   | 'article.markAllRead'
+  | 'article.bulkPatch'
   | 'article.toggleStar'
   | 'article.toggleReadLater'
   | 'article.archive'
@@ -183,6 +184,15 @@ const catalog: Record<UserOperationActionKey, UserOperationCatalogEntry> = {
     category: 'article',
     successMessage: () => '已标记全部为已读',
     errorPrefix: () => '标记全部为已读失败',
+  },
+  'article.bulkPatch': {
+    mode: 'immediate',
+    category: 'article',
+    successMessage: (context) => {
+      const count = typeof context?.count === 'number' ? context.count : 0;
+      return `已批量更新 ${count} 篇文章`;
+    },
+    errorPrefix: () => '批量更新文章失败',
   },
   'article.toggleStar': {
     mode: 'immediate',

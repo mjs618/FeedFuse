@@ -52,6 +52,13 @@ describe('userOperationCatalog', () => {
     expect(addError).not.toBe(removeError);
   });
 
+  it('renders bulk article patch messages', () => {
+    expect(renderUserOperationSuccess('article.bulkPatch', { count: 3 })).toBe('已批量更新 3 篇文章');
+    expect(renderUserOperationFailure('article.bulkPatch', undefined, { message: 'boom' })).toContain(
+      '批量更新文章失败',
+    );
+  });
+
   it('renders distinct archive operation messages for archive and unarchive contexts', () => {
     expect(getUserOperationCatalogEntry('article.archive')).toMatchObject({
       mode: 'immediate',

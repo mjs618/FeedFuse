@@ -9,6 +9,7 @@ const setArticleReadLaterMock = vi.fn();
 const setArticleArchivedMock = vi.fn();
 const setArticleStarredMock = vi.fn();
 const markAllReadMock = vi.fn();
+const bulkPatchArticlesMock = vi.fn();
 const getFeedFullTextOnOpenEnabledMock = vi.fn();
 const getFeedBodyTranslateEnabledMock = vi.fn();
 const getAiApiKeyMock = vi.fn();
@@ -63,6 +64,7 @@ vi.mock('@/server/domains/articles/repositories/articlesRepo', () => ({
   setArticleArchived: (...args: unknown[]) => setArticleArchivedMock(...args),
   setArticleStarred: (...args: unknown[]) => setArticleStarredMock(...args),
   markAllRead: (...args: unknown[]) => markAllReadMock(...args),
+  bulkPatchArticles: (...args: unknown[]) => bulkPatchArticlesMock(...args),
 }));
 vi.mock('@/server/domains/articles/repositories/articlesRepo', () => ({
   getArticleById: (...args: unknown[]) => getArticleByIdMock(...args),
@@ -71,6 +73,7 @@ vi.mock('@/server/domains/articles/repositories/articlesRepo', () => ({
   setArticleArchived: (...args: unknown[]) => setArticleArchivedMock(...args),
   setArticleStarred: (...args: unknown[]) => setArticleStarredMock(...args),
   markAllRead: (...args: unknown[]) => markAllReadMock(...args),
+  bulkPatchArticles: (...args: unknown[]) => bulkPatchArticlesMock(...args),
 }));
 vi.mock('@/server/domains/articles/repositories/articlesRepo', () => ({
   getArticleById: (...args: unknown[]) => getArticleByIdMock(...args),
@@ -79,6 +82,7 @@ vi.mock('@/server/domains/articles/repositories/articlesRepo', () => ({
   setArticleArchived: (...args: unknown[]) => setArticleArchivedMock(...args),
   setArticleStarred: (...args: unknown[]) => setArticleStarredMock(...args),
   markAllRead: (...args: unknown[]) => markAllReadMock(...args),
+  bulkPatchArticles: (...args: unknown[]) => bulkPatchArticlesMock(...args),
 }));
 vi.mock('@/server/domains/articles/repositories/articlesRepo', () => ({
   getArticleById: (...args: unknown[]) => getArticleByIdMock(...args),
@@ -87,6 +91,7 @@ vi.mock('@/server/domains/articles/repositories/articlesRepo', () => ({
   setArticleArchived: (...args: unknown[]) => setArticleArchivedMock(...args),
   setArticleStarred: (...args: unknown[]) => setArticleStarredMock(...args),
   markAllRead: (...args: unknown[]) => markAllReadMock(...args),
+  bulkPatchArticles: (...args: unknown[]) => bulkPatchArticlesMock(...args),
 }));
 vi.mock('@/server/domains/articles/repositories/articlesRepo', () => ({
   getArticleById: (...args: unknown[]) => getArticleByIdMock(...args),
@@ -95,6 +100,7 @@ vi.mock('@/server/domains/articles/repositories/articlesRepo', () => ({
   setArticleArchived: (...args: unknown[]) => setArticleArchivedMock(...args),
   setArticleStarred: (...args: unknown[]) => setArticleStarredMock(...args),
   markAllRead: (...args: unknown[]) => markAllReadMock(...args),
+  bulkPatchArticles: (...args: unknown[]) => bulkPatchArticlesMock(...args),
 }));
 vi.mock('@/server/domains/feeds/repositories/feedsRepo', () => ({
   getFeedFullTextOnOpenEnabled: (...args: unknown[]) => getFeedFullTextOnOpenEnabledMock(...args),
@@ -280,6 +286,7 @@ describe('/api/articles', () => {
     setArticleArchivedMock.mockReset();
     setArticleStarredMock.mockReset();
     markAllReadMock.mockReset();
+    bulkPatchArticlesMock.mockReset();
     getFeedFullTextOnOpenEnabledMock.mockReset();
     getFeedBodyTranslateEnabledMock.mockReset();
     getAiApiKeyMock.mockReset();
@@ -969,6 +976,89 @@ describe('/api/articles', () => {
       pool,
       expect.objectContaining({ actionKey: 'article.markAllRead' }),
     );
+  });
+
+  it('POST /bulk applies a valid bulk patch with de-duplicated ids', async () => {
+    bulkPatchArticlesMock.mockResolvedValue(2);
+    const mod = await import('../../../../app/api/articles/bulk/route');
+
+    const res = await mod.POST(
+      new Request('http://localhost/api/articles/bulk', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          articleIds: ['3001', '3001', '3002'],
+          patch: { isRead: true, isArchived: true },
+        }),
+      }),
+    );
+    const json = await res.json();
+
+    expect(json.ok).toBe(true);
+    expect(json.data).toEqual({
+      articleIds: ['3001', '3002'],
+      patch: { isRead: true, isArchived: true },
+      updatedCount: 2,
+    });
+    expect(bulkPatchArticlesMock).toHaveBeenCalledWith(pool, ['3001', '3002'], {
+      isRead: true,
+      isArchived: true,
+    });
+    expect(writeUserOperationSucceededLogMock).toHaveBeenCalledWith(
+      pool,
+      expect.objectContaining({
+        actionKey: 'article.bulkPatch',
+        source: 'app/api/articles/bulk',
+      }),
+    );
+  });
+
+  it('POST /bulk rejects an empty article id list', async () => {
+    const mod = await import('../../../../app/api/articles/bulk/route');
+    const res = await mod.POST(
+      new Request('http://localhost/api/articles/bulk', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ articleIds: [], patch: { isRead: true } }),
+      }),
+    );
+    const json = await res.json();
+
+    expect(json.ok).toBe(false);
+    expect(json.error.fields.articleIds).toBeTruthy();
+    expect(bulkPatchArticlesMock).not.toHaveBeenCalled();
+  });
+
+  it('POST /bulk rejects an empty patch', async () => {
+    const mod = await import('../../../../app/api/articles/bulk/route');
+    const res = await mod.POST(
+      new Request('http://localhost/api/articles/bulk', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ articleIds: ['3001'], patch: {} }),
+      }),
+    );
+    const json = await res.json();
+
+    expect(json.ok).toBe(false);
+    expect(json.error.fields['patch.body']).toBeTruthy();
+    expect(bulkPatchArticlesMock).not.toHaveBeenCalled();
+  });
+
+  it('POST /bulk rejects unknown patch fields', async () => {
+    const mod = await import('../../../../app/api/articles/bulk/route');
+    const res = await mod.POST(
+      new Request('http://localhost/api/articles/bulk', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ articleIds: ['3001'], patch: { isDeleted: true } }),
+      }),
+    );
+    const json = await res.json();
+
+    expect(json.ok).toBe(false);
+    expect(json.error.fields.patch).toBeTruthy();
+    expect(bulkPatchArticlesMock).not.toHaveBeenCalled();
   });
 
   it('POST /:id/fulltext returns enqueued=false when disabled', async () => {
