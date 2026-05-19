@@ -367,6 +367,210 @@ describe('appStore api integration', () => {
     });
   });
 
+  it('bulk patches visible articles optimistically, persists de-duplicated ids, and emits success context', async () => {
+    let bulkBody: Record<string, unknown> | null = null;
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/reader/snapshot') && method === 'GET') {
+        return jsonResponse({
+          ok: true,
+          data: createSnapshotPage({
+            items: [
+              createSnapshotArticle('3001', 'feed-1', 'First Bulk Target'),
+              createSnapshotArticle('3002', 'feed-1', 'Second Bulk Target'),
+            ],
+          }),
+        });
+      }
+
+      if (url.includes('/api/articles/bulk') && method === 'POST') {
+        bulkBody = await getFetchCallJsonBody(input, init);
+        return jsonResponse({
+          ok: true,
+          data: {
+            articleIds: ['3001', '3002'],
+            patch: { isReadLater: true },
+            updatedCount: 2,
+          },
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    await useAppStore.getState().loadSnapshot({ view: 'all' });
+
+    useAppStore
+      .getState()
+      .bulkPatchArticles(['3001', '3002', '3002'], { isReadLater: true });
+
+    expect(useAppStore.getState().articles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: '3001', isReadLater: true, readLaterAt: expect.any(String) }),
+        expect.objectContaining({ id: '3002', isReadLater: true, readLaterAt: expect.any(String) }),
+      ]),
+    );
+
+    await flushPromises();
+
+    expect(bulkBody).toEqual({
+      articleIds: ['3001', '3002'],
+      patch: { isReadLater: true },
+    });
+    expect(runImmediateSuccessMock).toHaveBeenCalledWith({
+      actionKey: 'article.bulkPatch',
+      context: { count: 2, patch: { isReadLater: true } },
+    });
+  });
+
+  it('bulk read patch updates feed unread counts from the previous article state', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/reader/snapshot') && method === 'GET') {
+        return jsonResponse({
+          ok: true,
+          data: createSnapshotPage({
+            feeds: [createSnapshotFeed('feed-1', 'Feed One', 2)],
+            items: [
+              createSnapshotArticle('3001', 'feed-1', 'First Unread Target'),
+              createSnapshotArticle('3002', 'feed-1', 'Second Unread Target'),
+            ],
+          }),
+        });
+      }
+
+      if (url.includes('/api/articles/bulk') && method === 'POST') {
+        return jsonResponse({
+          ok: true,
+          data: {
+            articleIds: ['3001', '3002'],
+            patch: { isRead: true },
+            updatedCount: 2,
+          },
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    await useAppStore.getState().loadSnapshot({ view: 'all' });
+
+    useAppStore.getState().bulkPatchArticles(['3001', '3002'], { isRead: true });
+
+    expect(useAppStore.getState().articles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: '3001', isRead: true }),
+        expect.objectContaining({ id: '3002', isRead: true }),
+      ]),
+    );
+    expect(useAppStore.getState().feeds[0]).toMatchObject({ unreadCount: 0 });
+  });
+
+  it('bulk archive patch advances selection when the selected article is archived', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/reader/snapshot') && method === 'GET') {
+        return jsonResponse({
+          ok: true,
+          data: createSnapshotPage({
+            items: [
+              createSnapshotArticle('3001', 'feed-1', 'Selected Bulk Archive Target'),
+              createSnapshotArticle('3002', 'feed-1', 'Next Bulk Article'),
+            ],
+          }),
+        });
+      }
+
+      if (url.includes('/api/articles/bulk') && method === 'POST') {
+        return jsonResponse({
+          ok: true,
+          data: {
+            articleIds: ['3001'],
+            patch: { isArchived: true },
+            updatedCount: 1,
+          },
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    await useAppStore.getState().loadSnapshot({ view: 'all' });
+    useAppStore.setState({ selectedArticleId: '3001' });
+
+    useAppStore.getState().bulkPatchArticles(['3001'], { isArchived: true });
+
+    expect(useAppStore.getState().articles.find((item) => item.id === '3001')).toMatchObject({
+      isArchived: true,
+      archivedAt: expect.any(String),
+    });
+    expect(useAppStore.getState().selectedArticleId).toBe('3002');
+  });
+
+  it('bulk patch failure emits one failure notification and reloads the current snapshot', async () => {
+    let snapshotRequestCount = 0;
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/reader/snapshot') && method === 'GET') {
+        snapshotRequestCount += 1;
+        return jsonResponse({
+          ok: true,
+          data: createSnapshotPage({
+            items: [
+              {
+                ...createSnapshotArticle('3001', 'feed-1', 'Bulk Failure Target'),
+                isReadLater: false,
+              },
+            ],
+          }),
+        });
+      }
+
+      if (url.includes('/api/articles/bulk') && method === 'POST') {
+        return jsonResponse(
+          {
+            ok: false,
+            error: {
+              code: 'internal_error',
+              message: 'Bulk update failed',
+            },
+          },
+          { status: 500 },
+        );
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    await useAppStore.getState().loadSnapshot({ view: 'all' });
+
+    useAppStore.getState().bulkPatchArticles(['3001'], { isReadLater: true });
+    expect(useAppStore.getState().articles[0]).toMatchObject({ isReadLater: true });
+
+    await flushPromises();
+    await flushPromises();
+
+    expect(runImmediateFailureMock).toHaveBeenCalledTimes(1);
+    expect(runImmediateFailureMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionKey: 'article.bulkPatch',
+        context: { count: 1, patch: { isReadLater: true } },
+      }),
+    );
+    expect(snapshotRequestCount).toBe(2);
+    expect(useAppStore.getState().articles[0]).toMatchObject({ isReadLater: false });
+  });
+
   it('toggles article read state both ways optimistically and persists the next value', async () => {
     const patchBodies: Record<string, unknown>[] = [];
 

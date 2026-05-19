@@ -3,6 +3,7 @@ import type { Article, Category, Feed, ViewType } from '../types';
 import { useSettingsStore } from './settingsStore';
 import { AI_DIGEST_VIEW_ID, shouldUseDefaultUnreadOnly } from '@/lib/reader/view';
 import {
+  bulkPatchArticles as bulkPatchArticlesRequest,
   createAiDigest,
   createFeed,
   deleteFeed,
@@ -17,6 +18,7 @@ import {
   patchFeed,
   patchArticle,
   refreshFeed,
+  type ArticlePatchInput,
 } from '@/lib/api/apiClient';
 import {
   runImmediateFailure,
@@ -135,6 +137,7 @@ interface AppState {
   toggleReadState: (articleId: string) => void;
   markAllAsRead: (feedId?: string) => void;
   toggleReadLater: (articleId: string) => void;
+  bulkPatchArticles: (articleIds: string[], patch: ArticlePatchInput) => void;
   archiveArticle: (articleId: string) => void;
   unarchiveArticle: (articleId: string) => void;
   addFeed: (feed: {
@@ -338,6 +341,72 @@ function updateArticleInVisibleCollections(
     ),
     articleDetailCache: updateCachedArticle(state.articleDetailCache, articleId, updater),
   };
+}
+
+function dedupeArticleIds(articleIds: string[]): string[] {
+  return Array.from(new Set(articleIds));
+}
+
+function hasDefinedArticlePatchValue(patch: ArticlePatchInput): boolean {
+  return Object.values(patch).some((value) => typeof value !== 'undefined');
+}
+
+function applyArticlePatch(
+  article: Article,
+  patch: ArticlePatchInput,
+  timestampIso: string,
+): Article {
+  return {
+    ...article,
+    ...(typeof patch.isRead === 'boolean' ? { isRead: patch.isRead } : {}),
+    ...(typeof patch.isStarred === 'boolean' ? { isStarred: patch.isStarred } : {}),
+    ...(typeof patch.isReadLater === 'boolean'
+      ? {
+          isReadLater: patch.isReadLater,
+          readLaterAt: patch.isReadLater ? (article.readLaterAt ?? timestampIso) : null,
+        }
+      : {}),
+    ...(typeof patch.isArchived === 'boolean'
+      ? {
+          isArchived: patch.isArchived,
+          archivedAt: patch.isArchived ? (article.archivedAt ?? timestampIso) : null,
+        }
+      : {}),
+  };
+}
+
+function getBulkUnreadDeltas(
+  state: Pick<AppState, 'articles' | 'articleDetailCache'>,
+  articleIds: Set<string>,
+  patch: ArticlePatchInput,
+): Map<string, number> {
+  const unreadDeltas = new Map<string, number>();
+  if (typeof patch.isRead !== 'boolean') return unreadDeltas;
+
+  const seenArticleIds = new Set<string>();
+  const collectArticleDelta = (article: Article) => {
+    if (!articleIds.has(article.id) || seenArticleIds.has(article.id)) return;
+    seenArticleIds.add(article.id);
+    if (article.isRead === patch.isRead) return;
+
+    const delta = patch.isRead ? -1 : 1;
+    unreadDeltas.set(article.feedId, (unreadDeltas.get(article.feedId) ?? 0) + delta);
+  };
+
+  state.articles.forEach(collectArticleDelta);
+  Object.values(state.articleDetailCache).forEach(collectArticleDelta);
+
+  return unreadDeltas;
+}
+
+function applyUnreadDeltas(feeds: Feed[], unreadDeltas: Map<string, number>): Feed[] {
+  if (unreadDeltas.size === 0) return feeds;
+
+  return feeds.map((feed) => {
+    const delta = unreadDeltas.get(feed.id) ?? 0;
+    if (delta === 0) return feed;
+    return { ...feed, unreadCount: Math.max(0, feed.unreadCount + delta) };
+  });
 }
 
 function shallowEqualRecord(left: object | undefined, right: object | undefined): boolean {
@@ -1191,6 +1260,52 @@ export const useAppStore = create<AppState>((set, get) => ({
         runImmediateFailure({
           actionKey: 'article.toggleReadLater',
           context: { readLater: nextValue },
+          err,
+        });
+        void loadCurrentSnapshotSilently(get);
+      });
+  },
+
+  bulkPatchArticles: (articleIds, patch) => {
+    const uniqueArticleIds = dedupeArticleIds(articleIds);
+    if (uniqueArticleIds.length === 0 || !hasDefinedArticlePatchValue(patch)) return;
+
+    const articleIdSet = new Set(uniqueArticleIds);
+    const timestampIso = new Date().toISOString();
+    const unreadDeltas = getBulkUnreadDeltas(get(), articleIdSet, patch);
+
+    set((state) => {
+      const articles = state.articles.map((article) =>
+        articleIdSet.has(article.id) ? applyArticlePatch(article, patch, timestampIso) : article,
+      );
+
+      return {
+        articles,
+        articleDetailCache: Object.fromEntries(
+          Object.entries(state.articleDetailCache).map(([id, article]) => [
+            id,
+            articleIdSet.has(id) ? applyArticlePatch(article, patch, timestampIso) : article,
+          ]),
+        ),
+        feeds: applyUnreadDeltas(state.feeds, unreadDeltas),
+        selectedArticleId:
+          patch.isArchived === true && state.selectedArticleId && articleIdSet.has(state.selectedArticleId)
+            ? findNextVisibleArticleId(articles, state.selectedArticleId)
+            : state.selectedArticleId,
+      };
+    });
+
+    void bulkPatchArticlesRequest(uniqueArticleIds, patch, { notifyOnError: false })
+      .then(() => {
+        runImmediateSuccess({
+          actionKey: 'article.bulkPatch',
+          context: { count: uniqueArticleIds.length, patch },
+        });
+      })
+      .catch((err) => {
+        runImmediateFailure({
+          actionKey: 'article.bulkPatch',
+          context: { count: uniqueArticleIds.length, patch },
           err,
         });
         void loadCurrentSnapshotSilently(get);
