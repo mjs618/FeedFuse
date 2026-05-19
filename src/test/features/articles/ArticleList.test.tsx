@@ -1,7 +1,7 @@
 import React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ViewType } from '../../../types';
+import type { Article, ViewType } from '../../../types';
 import { AI_DIGEST_VIEW_ID } from '@/lib/reader/view';
 
 type ArticleListModule = typeof import('../../../features/articles/components/ArticleList');
@@ -171,6 +171,21 @@ describe('ArticleList', () => {
       isRead: false,
       isStarred: false,
     }));
+  }
+
+  function createArticle(overrides: Partial<Article> = {}): Article {
+    return {
+      id: 'article-1',
+      feedId: 'feed-1',
+      title: 'Article 1',
+      content: '',
+      summary: 'Summary',
+      publishedAt: new Date('2026-02-25T00:00:00.000Z').toISOString(),
+      link: 'https://example.com/article-1',
+      isRead: false,
+      isStarred: false,
+      ...overrides,
+    };
   }
 
   beforeEach(async () => {
@@ -456,6 +471,133 @@ describe('ArticleList', () => {
 
     expect(firstButton).toHaveFocus();
     expect(useAppStore.getState().selectedArticleId).toBe('art-1');
+  });
+
+  it('enters selection mode and toggles selected rows', () => {
+    useAppStore.setState({
+      selectedView: 'feed-1',
+      showUnreadOnly: false,
+      selectedArticleId: null,
+      articles: [
+        createArticle({ id: '3001', title: 'One' }),
+        createArticle({ id: '3002', title: 'Two' }),
+      ],
+    });
+
+    renderWithNotifications();
+
+    fireEvent.click(screen.getByRole('button', { name: '选择文章' }));
+    expect(screen.getByText('已选 0 篇')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 One' }));
+    expect(screen.getByText('已选 1 篇')).toBeInTheDocument();
+  });
+
+  it('selects the current loaded list and runs a bulk read action', () => {
+    const bulkPatchArticles = vi.fn();
+    useAppStore.setState({
+      selectedView: 'feed-1',
+      showUnreadOnly: false,
+      selectedArticleId: null,
+      articles: [
+        createArticle({ id: '3001', title: 'One' }),
+        createArticle({ id: '3002', title: 'Two' }),
+      ],
+      bulkPatchArticles,
+    });
+
+    renderWithNotifications();
+
+    fireEvent.click(screen.getByRole('button', { name: '选择文章' }));
+    fireEvent.click(screen.getByRole('button', { name: '选择当前列表' }));
+    fireEvent.click(screen.getByRole('button', { name: '标为已读' }));
+
+    expect(bulkPatchArticles).toHaveBeenCalledWith(['3001', '3002'], { isRead: true });
+    expect(screen.queryByText(/已选/)).not.toBeInTheDocument();
+  });
+
+  it('row click toggles selection instead of opening in selection mode', () => {
+    const setSelectedArticle = vi.fn();
+    useAppStore.setState({
+      selectedView: 'feed-1',
+      showUnreadOnly: false,
+      selectedArticleId: null,
+      articles: [createArticle({ id: '3001', title: 'One' })],
+      setSelectedArticle,
+    });
+
+    renderWithNotifications();
+
+    fireEvent.click(screen.getByRole('button', { name: '选择文章' }));
+    fireEvent.click(screen.getByTestId('article-card-3001-title').closest('button') as HTMLButtonElement);
+
+    expect(screen.getByText('已选 1 篇')).toBeInTheDocument();
+    expect(setSelectedArticle).not.toHaveBeenCalled();
+  });
+
+  it('confirms bulk archive when more than 20 articles are selected', async () => {
+    const bulkPatchArticles = vi.fn();
+    useAppStore.setState({
+      selectedView: 'feed-1',
+      showUnreadOnly: false,
+      selectedArticleId: null,
+      articles: Array.from({ length: 21 }, (_, index) =>
+        createArticle({
+          id: String(3001 + index),
+          title: `Article ${index + 1}`,
+          publishedAt: new Date(Date.UTC(2026, 1, 25, 0, 21 - index, 0)).toISOString(),
+        }),
+      ),
+      bulkPatchArticles,
+    });
+
+    renderWithNotifications();
+
+    fireEvent.click(screen.getByRole('button', { name: '选择文章' }));
+    fireEvent.click(screen.getByRole('button', { name: '选择当前列表' }));
+    fireEvent.click(screen.getByRole('button', { name: '归档' }));
+
+    expect(await screen.findByRole('alertdialog', { name: '确认批量归档' })).toBeInTheDocument();
+    expect(bulkPatchArticles).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '确认归档' }));
+
+    expect(bulkPatchArticles).toHaveBeenCalledWith(expect.arrayContaining(['3001', '3021']), {
+      isArchived: true,
+    });
+  });
+
+  it('uses x to toggle current article selection and shift+x to exit selection mode', () => {
+    useAppStore.setState({
+      selectedView: 'feed-1',
+      showUnreadOnly: false,
+      selectedArticleId: '3001',
+      articles: [createArticle({ id: '3001', title: 'One' })],
+    });
+
+    renderWithNotifications();
+
+    fireEvent.keyDown(window, { key: 'x' });
+    expect(screen.getByText('已选 1 篇')).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'X', shiftKey: true });
+    expect(screen.queryByText(/已选/)).not.toBeInTheDocument();
+  });
+
+  it('uses escape to leave selection mode', () => {
+    useAppStore.setState({
+      selectedView: 'feed-1',
+      showUnreadOnly: false,
+      selectedArticleId: '3001',
+      articles: [createArticle({ id: '3001', title: 'One' })],
+    });
+
+    renderWithNotifications();
+
+    fireEvent.click(screen.getByRole('button', { name: '选择文章' }));
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    expect(screen.queryByText(/已选/)).not.toBeInTheDocument();
   });
 
   it('loads next page when scrolling near the bottom', async () => {

@@ -1,4 +1,15 @@
-import { CheckCheck, CircleDot, LayoutGrid, List, RefreshCw } from "lucide-react";
+import {
+  Archive,
+  CheckCheck,
+  CheckSquare,
+  CircleDot,
+  Clock3,
+  LayoutGrid,
+  List,
+  RefreshCw,
+  Star,
+  X,
+} from "lucide-react";
 import {
   type KeyboardEvent,
   type UIEvent,
@@ -18,12 +29,23 @@ import {
   patchFeed,
   refreshAllFeeds,
   refreshFeed,
+  type ArticlePatchInput,
 } from "@/lib/api/apiClient";
 import { resolveArticleBriefContent } from "@/lib/reader/articleSummary";
 import { useRenderTimeSnapshot } from "../../../hooks";
 import { READER_PANE_HOVER_BACKGROUND_CLASS_NAME } from "@/lib/ui/designSystem";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   AI_DIGEST_VIEW_ID,
   isAggregateView as isAggregateReaderView,
@@ -173,6 +195,7 @@ export default function ArticleList({
   const selectedArticleId = useAppStore((state) => state.selectedArticleId);
   const setSelectedArticle = useAppStore((state) => state.setSelectedArticle);
   const markAllAsRead = useAppStore((state) => state.markAllAsRead);
+  const bulkPatchArticles = useAppStore((state) => state.bulkPatchArticles);
   const showUnreadOnly = useAppStore((state) => state.showUnreadOnly);
   const toggleShowUnreadOnly = useAppStore((state) => state.toggleShowUnreadOnly);
   const loadSnapshot = useAppStore((state) => state.loadSnapshot);
@@ -186,6 +209,9 @@ export default function ArticleList({
   const hasInitializedSelectedViewRef = useRef(false);
   const [refreshing, setRefreshing] = useState(false);
   const [displayModeSaving, setDisplayModeSaving] = useState(false);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedArticleIds, setSelectedArticleIds] = useState<Set<string>>(() => new Set());
+  const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
   const renderedSelectedView = useHydratedSelectedView(selectedView, initialSelectedView);
 
   const showUnreadToggleAction = shouldUseDefaultUnreadOnly(renderedSelectedView);
@@ -507,6 +533,109 @@ export default function ArticleList({
 
   const articleCount =
     articleListTotalCount || (showUnreadFilterActive ? unreadCount : filteredArticles.length);
+  const filteredArticleIds = useMemo(
+    () => filteredArticles.map((article) => article.id),
+    [filteredArticles],
+  );
+  const selectedCount = selectedArticleIds.size;
+
+  const clearSelectionMode = useCallback(() => {
+    setSelectionMode(false);
+    setArchiveConfirmOpen(false);
+    setSelectedArticleIds(new Set());
+  }, []);
+
+  const toggleSelectedArticle = useCallback((articleId: string) => {
+    setSelectionMode(true);
+    setSelectedArticleIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(articleId)) {
+        next.delete(articleId);
+      } else {
+        next.add(articleId);
+      }
+      return next;
+    });
+  }, []);
+
+  const selectCurrentLoadedArticles = useCallback(() => {
+    setSelectionMode(true);
+    setSelectedArticleIds(new Set(filteredArticleIds));
+  }, [filteredArticleIds]);
+
+  const runBulkPatch = useCallback(
+    (patch: ArticlePatchInput) => {
+      const articleIds = Array.from(selectedArticleIds);
+      if (articleIds.length === 0) return;
+      bulkPatchArticles(articleIds, patch);
+      clearSelectionMode();
+    },
+    [bulkPatchArticles, clearSelectionMode, selectedArticleIds],
+  );
+
+  const runBulkArchive = useCallback(() => {
+    if (selectedCount === 0) return;
+    if (selectedCount > 20) {
+      setArchiveConfirmOpen(true);
+      return;
+    }
+    runBulkPatch({ isArchived: true });
+  }, [runBulkPatch, selectedCount]);
+
+  const confirmBulkArchive = useCallback(() => {
+    setArchiveConfirmOpen(false);
+    runBulkPatch({ isArchived: true });
+  }, [runBulkPatch]);
+
+  useEffect(() => {
+    const visibleArticleIds = new Set(filteredArticleIds);
+    setSelectedArticleIds((previous) => {
+      const next = new Set(Array.from(previous).filter((id) => visibleArticleIds.has(id)));
+      return areSetsEqual(previous, next) ? previous : next;
+    });
+  }, [filteredArticleIds]);
+
+  useEffect(() => {
+    const handleSelectionShortcuts = (event: globalThis.KeyboardEvent) => {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (
+        target?.closest(
+          'input, textarea, select, [contenteditable="true"], [role="dialog"], [role="alertdialog"], [data-radix-popper-content-wrapper]',
+        ) ||
+        document.querySelector('[role="dialog"], [role="alertdialog"]')
+      ) {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+      if (key === "x" && event.shiftKey) {
+        event.preventDefault();
+        if (selectionMode) {
+          clearSelectionMode();
+        } else {
+          setSelectionMode(true);
+        }
+        return;
+      }
+
+      if (key === "x") {
+        if (!selectedArticleId) return;
+        event.preventDefault();
+        toggleSelectedArticle(selectedArticleId);
+        return;
+      }
+
+      if (event.key === "Escape" && selectionMode) {
+        event.preventDefault();
+        clearSelectionMode();
+      }
+    };
+
+    window.addEventListener("keydown", handleSelectionShortcuts);
+    return () => window.removeEventListener("keydown", handleSelectionShortcuts);
+  }, [clearSelectionMode, selectedArticleId, selectionMode, toggleSelectedArticle]);
 
   const selectedFeed = isAggregateView ? null : feedById.get(renderedSelectedView) ?? selectedFeedFromStore;
   const headerTitle =
@@ -618,6 +747,12 @@ export default function ArticleList({
 
   const handleArticleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLButtonElement>, articleId: string) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        setSelectedArticle(articleId);
+        return;
+      }
+
       if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
         return;
       }
@@ -939,6 +1074,42 @@ export default function ArticleList({
       });
   };
 
+  const handleArticlePress = (articleId: string) => {
+    if (selectionMode) {
+      toggleSelectedArticle(articleId);
+      return;
+    }
+
+    setSelectedArticle(articleId);
+  };
+
+  const renderSelectionCheckbox = (articleId: string, displayTitle: string) => {
+    if (!selectionMode) return null;
+
+    const selected = selectedArticleIds.has(articleId);
+    return (
+      <span
+        role="checkbox"
+        aria-checked={selected}
+        aria-label={`选择 ${displayTitle}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          toggleSelectedArticle(articleId);
+        }}
+        className={cn(
+          "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors",
+          selected
+            ? "border-primary bg-primary text-primary-foreground"
+            : "border-border bg-background text-transparent",
+        )}
+      >
+        <span aria-hidden="true" className="text-[10px] leading-none">
+          ✓
+        </span>
+      </span>
+    );
+  };
+
   const renderVirtualRow = (row: (typeof visibleRows)[number]) => {
     if (row.type === "section") {
       return (
@@ -980,19 +1151,24 @@ export default function ArticleList({
           data-article-nav="true"
           data-article-id={article.id}
           type="button"
-          onClick={() => setSelectedArticle(article.id)}
+          onClick={() => handleArticlePress(article.id)}
+          onDoubleClick={() => setSelectedArticle(article.id)}
           onKeyDown={(event) => handleArticleKeyDown(event, article.id)}
           aria-current={selectedArticleId === article.id ? "true" : undefined}
           aria-label={getArticleButtonLabel(article, displayTitle)}
           className={cn(
             "w-full rounded-xl border border-transparent px-4 py-2.5 text-left transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset dark:border-white/[0.03]",
-            selectedArticleId === article.id
+            selectionMode && selectedArticleIds.has(article.id)
+              ? "border-primary/40 bg-primary/5 dark:border-primary/30 dark:bg-primary/10"
+              : selectedArticleId === article.id
               ? SELECTED_ARTICLE_ROW_CLASS_NAME
               : READER_PANE_HOVER_BACKGROUND_CLASS_NAME,
           )}
           style={{ height: row.height }}
         >
-          <div className="min-w-0">
+          <div className="flex min-w-0 items-start gap-3">
+            {renderSelectionCheckbox(article.id, displayTitle)}
+            <div className="min-w-0 flex-1">
                 <span
                   data-testid={`article-list-row-${article.id}-title`}
                   data-selected-row-title
@@ -1039,6 +1215,7 @@ export default function ArticleList({
               </div>
             </div>
           </div>
+          </div>
         </button>
       );
     }
@@ -1057,19 +1234,23 @@ export default function ArticleList({
           articleCardRefs.current.delete(article.id);
         }}
         type="button"
-        onClick={() => setSelectedArticle(article.id)}
+        onClick={() => handleArticlePress(article.id)}
+        onDoubleClick={() => setSelectedArticle(article.id)}
         onKeyDown={(event) => handleArticleKeyDown(event, article.id)}
         aria-current={selectedArticleId === article.id ? "true" : undefined}
         aria-label={getArticleButtonLabel(article, displayTitle)}
         className={cn(
           "w-full rounded-xl border border-transparent px-4 py-2.5 text-left transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset dark:border-white/[0.03]",
-          selectedArticleId === article.id
+          selectionMode && selectedArticleIds.has(article.id)
+            ? "border-primary/40 bg-primary/5 dark:border-primary/30 dark:bg-primary/10"
+            : selectedArticleId === article.id
             ? SELECTED_ARTICLE_ROW_CLASS_NAME
             : READER_PANE_HOVER_BACKGROUND_CLASS_NAME,
         )}
         style={{ height: row.height }}
       >
         <div className="flex h-full items-stretch gap-3">
+          {renderSelectionCheckbox(article.id, displayTitle)}
           <div className="flex h-full min-w-0 flex-1 flex-col">
             <h3
               data-testid={`article-card-${article.id}-title`}
@@ -1166,12 +1347,65 @@ export default function ArticleList({
     );
   };
 
+  const renderSelectionToolbar = () => (
+    <div className="flex h-12 min-w-0 items-center justify-between gap-3 border-b border-transparent px-4 dark:border-white/[0.04]">
+      <span className="min-w-0 truncate text-[0.9rem] font-semibold">
+        已选 {selectedCount} 篇
+      </span>
+      <div className="shrink-0 flex items-center gap-2">
+        <ReaderToolbarIconButton
+          icon={CheckSquare}
+          label="选择当前列表"
+          disabled={filteredArticleIds.length === 0}
+          onClick={selectCurrentLoadedArticles}
+        />
+        <ReaderToolbarIconButton
+          icon={CheckCheck}
+          label="标为已读"
+          disabled={selectedCount === 0}
+          onClick={() => runBulkPatch({ isRead: true })}
+        />
+        <ReaderToolbarIconButton
+          icon={CircleDot}
+          label="标为未读"
+          disabled={selectedCount === 0}
+          onClick={() => runBulkPatch({ isRead: false })}
+        />
+        <ReaderToolbarIconButton
+          icon={Star}
+          label="加星标"
+          disabled={selectedCount === 0}
+          onClick={() => runBulkPatch({ isStarred: true })}
+        />
+        <ReaderToolbarIconButton
+          icon={Clock3}
+          label="稍后读"
+          disabled={selectedCount === 0}
+          onClick={() => runBulkPatch({ isReadLater: true })}
+        />
+        <ReaderToolbarIconButton
+          icon={Archive}
+          label="归档"
+          disabled={selectedCount === 0}
+          onClick={runBulkArchive}
+        />
+        <ReaderToolbarIconButton icon={X} label="取消选择" onClick={clearSelectionMode} />
+      </div>
+    </div>
+  );
+
   return (
     <div
       className="flex h-full flex-col dark:bg-[linear-gradient(180deg,rgba(14,14,18,0.3),rgba(8,8,10,0))]"
       aria-busy={refreshing || displayModeSaving}
     >
-      <div className="flex h-12 min-w-0 items-center justify-between gap-3 border-b border-transparent px-4 dark:border-white/[0.04]">
+      {selectionMode ? renderSelectionToolbar() : null}
+      <div
+        className={cn(
+          "flex h-12 min-w-0 items-center justify-between gap-3 border-b border-transparent px-4 dark:border-white/[0.04]",
+          selectionMode && "hidden",
+        )}
+      >
         <h2
           className="min-w-0 truncate text-[0.96rem] font-semibold tracking-[0.01em]"
           title={headerTitle}
@@ -1210,6 +1444,12 @@ export default function ArticleList({
               onClick={handleMarkAllAsRead}
             />
           )}
+          <ReaderToolbarIconButton
+            icon={CheckSquare}
+            label="选择文章"
+            pressed={selectionMode}
+            onClick={() => setSelectionMode(true)}
+          />
           <span className="text-[10px] font-medium text-muted-foreground">{articleCount} 篇</span>
         </div>
       </div>
@@ -1232,6 +1472,21 @@ export default function ArticleList({
           </>
         )}
       </div>
+
+      <AlertDialog open={archiveConfirmOpen} onOpenChange={setArchiveConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认批量归档</AlertDialogTitle>
+            <AlertDialogDescription>
+              将归档当前选中的 {selectedCount} 篇文章。这个操作只影响已选文章，之后仍可从归档视图恢复。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmBulkArchive}>确认归档</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

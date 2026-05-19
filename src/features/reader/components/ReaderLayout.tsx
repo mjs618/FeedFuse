@@ -285,7 +285,11 @@ export default function ReaderLayout({ renderedAt, initialSelectedView }: Reader
   useEffect(() => {
     // Reader-level shortcuts live here because this layout owns the search dialog state.
     const handleGlobalShortcuts = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.altKey || (event.shiftKey && event.key !== '?')) {
+      if (
+        event.defaultPrevented ||
+        event.altKey ||
+        (event.shiftKey && event.key !== '?' && event.key.toLowerCase() !== 'x')
+      ) {
         return;
       }
 
@@ -324,6 +328,10 @@ export default function ReaderLayout({ renderedAt, initialSelectedView }: Reader
       }
 
       if (shortcutHelpOpen || actionSuppressingOverlayOpen) {
+        return;
+      }
+
+      if (key === 'x') {
         return;
       }
 

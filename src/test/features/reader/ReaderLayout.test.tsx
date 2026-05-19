@@ -591,6 +591,48 @@ describe('ReaderLayout', () => {
     expect(markAsRead).not.toHaveBeenCalled();
   });
 
+  it('leaves x selection shortcuts available for the article list', async () => {
+    resetSettingsStore();
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
+    const toggleStar = vi.fn();
+    const toggleReadLater = vi.fn();
+    const archiveArticle = vi.fn();
+    const toggleReadState = vi.fn();
+    useAppStore.setState({
+      articles: [createReaderArticle({ id: 'article-1' })],
+      selectedView: 'all',
+      selectedArticleId: 'article-1',
+      toggleStar,
+      toggleReadLater,
+      archiveArticle,
+      toggleReadState,
+    });
+
+    await renderWithNotificationsSettled();
+
+    const toggleCurrentEvent = new KeyboardEvent('keydown', {
+      key: 'x',
+      bubbles: true,
+      cancelable: true,
+    });
+    const toggleModeEvent = new KeyboardEvent('keydown', {
+      key: 'X',
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+
+    window.dispatchEvent(toggleCurrentEvent);
+    window.dispatchEvent(toggleModeEvent);
+
+    expect(toggleCurrentEvent.defaultPrevented).toBe(false);
+    expect(toggleModeEvent.defaultPrevented).toBe(false);
+    expect(toggleStar).not.toHaveBeenCalled();
+    expect(toggleReadLater).not.toHaveBeenCalled();
+    expect(archiveArticle).not.toHaveBeenCalled();
+    expect(toggleReadState).not.toHaveBeenCalled();
+  });
+
   it('opens and closes shortcut help with ? while preserving editable targets', async () => {
     resetSettingsStore();
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
@@ -610,6 +652,10 @@ describe('ReaderLayout', () => {
 
     fireEvent.keyDown(window, { key: '?', shiftKey: true });
     expect(screen.getByRole('dialog', { name: '快捷键' })).toBeInTheDocument();
+    expect(screen.getByText('X')).toBeInTheDocument();
+    expect(screen.getByText('Shift + X')).toBeInTheDocument();
+    expect(screen.getByText('选择当前文章')).toBeInTheDocument();
+    expect(screen.getByText('进入 / 退出选择模式')).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: '?', shiftKey: true });
     await waitFor(() => {
