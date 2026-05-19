@@ -461,6 +461,77 @@ export async function setArticleArchived(
   );
 }
 
+export type ArticleBulkPatch = {
+  isRead?: boolean;
+  isStarred?: boolean;
+  isReadLater?: boolean;
+  isArchived?: boolean;
+};
+
+type ArticleBulkPatchKey = keyof ArticleBulkPatch;
+
+const articleBulkPatchAssignments: Record<
+  ArticleBulkPatchKey,
+  (paramIndex: number) => string[]
+> = {
+  isRead: (paramIndex) => [
+    `is_read = $${paramIndex}`,
+    `read_at = case when $${paramIndex} then coalesce(read_at, now()) else null end`,
+  ],
+  isStarred: (paramIndex) => [
+    `is_starred = $${paramIndex}`,
+    `starred_at = case when $${paramIndex} then coalesce(starred_at, now()) else null end`,
+  ],
+  isReadLater: (paramIndex) => [
+    `is_read_later = $${paramIndex}`,
+    `read_later_at = case when $${paramIndex} then coalesce(read_later_at, now()) else null end`,
+  ],
+  isArchived: (paramIndex) => [
+    `is_archived = $${paramIndex}`,
+    `archived_at = case when $${paramIndex} then coalesce(archived_at, now()) else null end`,
+  ],
+};
+
+const articleBulkPatchKeys: ArticleBulkPatchKey[] = [
+  'isRead',
+  'isStarred',
+  'isReadLater',
+  'isArchived',
+];
+
+export async function bulkPatchArticles(
+  pool: DbClient,
+  articleIds: string[],
+  patch: ArticleBulkPatch,
+): Promise<number> {
+  const assignments: string[] = [];
+  const values: Array<string[] | boolean> = [articleIds];
+
+  for (const key of articleBulkPatchKeys) {
+    const value = patch[key];
+    if (typeof value === 'undefined') continue;
+
+    values.push(value);
+    assignments.push(...articleBulkPatchAssignments[key](values.length));
+  }
+
+  if (assignments.length === 0) {
+    throw new Error('No article patch fields provided');
+  }
+
+  const { rowCount } = await pool.query(
+    `
+      update articles
+      set
+        ${assignments.join(',\n        ')}
+      where id = any($1::bigint[])
+    `,
+    values,
+  );
+
+  return rowCount ?? 0;
+}
+
 export async function markAllRead(
   pool: DbClient,
   input: { feedId?: string },
