@@ -83,6 +83,18 @@ describe('readerSnapshotService', () => {
     expect(filter.params[1]).toEqual(['passed', 'error', 'filtered']);
   });
 
+  it('filters tag views through article_taggings and excludes archived articles', () => {
+    const filter = buildArticleFilter({
+      view: 'tag:00000000-0000-4000-8000-000000000001',
+    });
+
+    expect(filter.whereSql).toContain(
+      'articles.id in (select article_id from article_taggings where tag_id = $1::uuid)',
+    );
+    expect(filter.whereSql).toContain('is_archived = false');
+    expect(filter.params[0]).toBe('00000000-0000-4000-8000-000000000001');
+  });
+
   it('roundtrips cursor', () => {
     const cursor = encodeCursor({ publishedAt: '2026-01-01T00:00:00.000Z', id: 'id-1' });
     expect(decodeCursor(cursor)).toEqual({
@@ -111,6 +123,86 @@ describe('readerSnapshotService', () => {
     expect(articleQuery).toContain('articles.read_later_at as "readLaterAt"');
     expect(articleQuery).toContain('articles.is_archived as "isArchived"');
     expect(articleQuery).toContain('articles.archived_at as "archivedAt"');
+  });
+
+  it('selects article tags and sidebar tags in reader snapshot', async () => {
+    const queries: string[] = [];
+    const pool = {
+      query: async (sql: string) => {
+        queries.push(sql);
+        if (sql.includes('select count(*)::int as "totalCount"')) {
+          return { rows: [{ totalCount: 1 }] };
+        }
+        if (sql.includes('from articles') && sql.includes('"sortPublishedAt"')) {
+          return {
+            rows: [
+              {
+                id: '3001',
+                feedId: 'feed-1',
+                title: 'Article',
+                titleOriginal: 'Article',
+                titleZh: null,
+                summary: null,
+                previewImage: null,
+                author: null,
+                publishedAt: null,
+                link: null,
+                filterStatus: 'passed',
+                isFiltered: false,
+                filteredBy: [],
+                sourceLanguage: null,
+                contentHtml: null,
+                contentFullHtml: null,
+                isRead: false,
+                isStarred: false,
+                isReadLater: false,
+                readLaterAt: null,
+                isArchived: false,
+                archivedAt: null,
+                aiSummarySessionId: null,
+                aiSummarySessionStatus: null,
+                aiSummarySessionDraftText: null,
+                aiSummarySessionFinalText: null,
+                aiSummarySessionErrorCode: null,
+                aiSummarySessionErrorMessage: null,
+                aiSummarySessionRawErrorMessage: null,
+                aiSummarySessionStartedAt: null,
+                aiSummarySessionFinishedAt: null,
+                aiSummarySessionUpdatedAt: null,
+                sortPublishedAt: '1970-01-01T00:00:00.000Z',
+              },
+            ],
+          };
+        }
+        if (sql.includes('from categories')) return { rows: [] };
+        if (sql.includes('from feeds')) return { rows: [] };
+        if (sql.includes('select feed_id as "feedId"')) return { rows: [] };
+        if (sql.includes('from article_tags tags') && sql.includes('"articleCount"')) {
+          return {
+            rows: [{ id: 'tag-1', name: 'AI', slug: 'ai', color: null, articleCount: 1 }],
+          };
+        }
+        if (sql.includes('from article_tags tags') && sql.includes('taggings.article_id = any')) {
+          return {
+            rows: [{ articleId: '3001', id: 'tag-1', name: 'AI', slug: 'ai', color: null }],
+          };
+        }
+        return { rows: [] };
+      },
+    };
+
+    const snapshot = await getReaderSnapshot(pool as never, { view: 'all' });
+
+    expect(snapshot.tags).toEqual([
+      { id: 'tag-1', name: 'AI', slug: 'ai', color: null, articleCount: 1 },
+    ]);
+    expect(snapshot.articles.items).toHaveLength(1);
+    expect(snapshot.articles.items[0]?.tags).toEqual([
+      { id: 'tag-1', name: 'AI', slug: 'ai', color: null },
+    ]);
+    expect(
+      queries.some((sql) => sql.includes('from article_tags tags') && sql.includes('"articleCount"')),
+    ).toBe(true);
   });
 
   it('excludes archived articles from feed unread counts', async () => {

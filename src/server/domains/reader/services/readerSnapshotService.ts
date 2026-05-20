@@ -11,9 +11,16 @@ import { buildImageProxyUrl, getOptionalImageProxySecret } from '@/server/integr
 import { evaluateArticleBodyTranslationEligibility } from '@/server/integrations/ai/articleTranslationEligibility';
 import { listCategories } from '@/server/domains/feeds/repositories/categoriesRepo';
 import { listFeeds } from '@/server/domains/feeds/repositories/feedsRepo';
+import {
+  listTagsForArticles,
+  listTagsWithVisibleArticleCounts,
+  type ArticleTagRow,
+  type ReaderTagRow,
+} from '@/server/domains/articles/repositories/articleTagsRepo';
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
+const TAG_VIEW_PREFIX = 'tag:';
 
 export interface CursorPayload {
   publishedAt: string;
@@ -48,6 +55,10 @@ function serializeCursorPublishedAt(value: unknown): string {
   return String(value);
 }
 
+function getTagViewId(view: string): string | null {
+  return view.startsWith(TAG_VIEW_PREFIX) ? view.slice(TAG_VIEW_PREFIX.length) : null;
+}
+
 export function buildArticleFilter(input: {
   view: string;
   cursor?: string | null;
@@ -58,8 +69,14 @@ export function buildArticleFilter(input: {
   const whereParts: string[] = [];
   const params: unknown[] = [];
   let paramIndex = 1;
+  const tagViewId = getTagViewId(input.view);
 
-  if (input.view === AI_DIGEST_VIEW_ID) {
+  if (tagViewId) {
+    whereParts.push(
+      `articles.id in (select article_id from article_taggings where tag_id = $${paramIndex++}::uuid)`,
+    );
+    params.push(tagViewId);
+  } else if (input.view === AI_DIGEST_VIEW_ID) {
     whereParts.push("feed_id in (select id from feeds where kind = 'ai_digest')");
   } else if (input.view === READ_LATER_VIEW_ID) {
     whereParts.push('is_read_later = true');
@@ -87,6 +104,7 @@ export function buildArticleFilter(input: {
   }
 
   const isSpecificFeedView =
+    !tagViewId &&
     input.view !== 'all' &&
     input.view !== 'unread' &&
     input.view !== 'starred' &&
@@ -132,6 +150,7 @@ export interface ReaderSnapshotArticleItem {
   author: string | null;
   publishedAt: string | null;
   link: string | null;
+  tags: ArticleTagRow[];
   filterStatus: 'pending' | 'passed' | 'filtered' | 'error';
   isFiltered: boolean;
   filteredBy: string[];
@@ -156,6 +175,8 @@ export interface ReaderSnapshotArticleItem {
     updatedAt: string;
   } | null;
 }
+
+export type ReaderSnapshotTag = ReaderTagRow;
 
 export interface ReaderSnapshotFeed {
   id: string;
@@ -185,6 +206,7 @@ export interface ReaderSnapshotFeed {
 export interface ReaderSnapshot {
   categories: Awaited<ReturnType<typeof listCategories>>;
   feeds: ReaderSnapshotFeed[];
+  tags: ReaderSnapshotTag[];
   articles: {
     items: ReaderSnapshotArticleItem[];
     nextCursor: string | null;
@@ -387,9 +409,10 @@ export async function getReaderSnapshot(
     includeFiltered?: boolean;
   },
 ): Promise<ReaderSnapshot> {
-  const [categories, feeds] = await Promise.all([
+  const [categories, feeds, tags] = await Promise.all([
     listCategories(pool),
     listFeeds(pool),
+    listTagsWithVisibleArticleCounts(pool),
   ]);
 
   const { rows: unreadRows } = await pool.query<{
@@ -437,10 +460,21 @@ export async function getReaderSnapshot(
         })
       : null;
   const rows = queriedRows.slice(0, limit);
+  const tagRows = await listTagsForArticles(
+    pool,
+    rows.map((row) => row.id),
+  );
+  const tagsByArticleId = new Map<string, ArticleTagRow[]>();
+  for (const tag of tagRows) {
+    const list = tagsByArticleId.get(tag.articleId) ?? [];
+    list.push({ id: tag.id, name: tag.name, slug: tag.slug, color: tag.color });
+    tagsByArticleId.set(tag.articleId, list);
+  }
 
   return {
     categories,
     feeds: feedsWithUnread,
+    tags,
     articles: {
       items: rows.map((item) => {
         const {
@@ -469,6 +503,7 @@ export async function getReaderSnapshot(
         void sortPublishedAt;
         return {
           ...rest,
+          tags: tagsByArticleId.get(rest.id) ?? [],
           previewImage: rewritePreviewImage(rest.previewImage),
           bodyTranslationEligible: eligibility.bodyTranslationEligible,
           bodyTranslationBlockedReason: eligibility.bodyTranslationBlockedReason,
