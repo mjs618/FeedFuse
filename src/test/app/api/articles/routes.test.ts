@@ -10,6 +10,8 @@ const setArticleArchivedMock = vi.fn();
 const setArticleStarredMock = vi.fn();
 const markAllReadMock = vi.fn();
 const bulkPatchArticlesMock = vi.fn();
+const attachArticleTagMock = vi.fn();
+const detachArticleTagMock = vi.fn();
 const getFeedFullTextOnOpenEnabledMock = vi.fn();
 const getFeedBodyTranslateEnabledMock = vi.fn();
 const getAiApiKeyMock = vi.fn();
@@ -101,6 +103,11 @@ vi.mock('@/server/domains/articles/repositories/articlesRepo', () => ({
   setArticleStarred: (...args: unknown[]) => setArticleStarredMock(...args),
   markAllRead: (...args: unknown[]) => markAllReadMock(...args),
   bulkPatchArticles: (...args: unknown[]) => bulkPatchArticlesMock(...args),
+}));
+vi.mock('@/server/domains/articles/repositories/articleTagsRepo', () => ({
+  attachArticleTag: (...args: unknown[]) => attachArticleTagMock(...args),
+  detachArticleTag: (...args: unknown[]) => detachArticleTagMock(...args),
+  TAG_NAME_MAX_LENGTH: 64,
 }));
 vi.mock('@/server/domains/feeds/repositories/feedsRepo', () => ({
   getFeedFullTextOnOpenEnabled: (...args: unknown[]) => getFeedFullTextOnOpenEnabledMock(...args),
@@ -287,6 +294,8 @@ describe('/api/articles', () => {
     setArticleStarredMock.mockReset();
     markAllReadMock.mockReset();
     bulkPatchArticlesMock.mockReset();
+    attachArticleTagMock.mockReset();
+    detachArticleTagMock.mockReset();
     getFeedFullTextOnOpenEnabledMock.mockReset();
     getFeedBodyTranslateEnabledMock.mockReset();
     getAiApiKeyMock.mockReset();
@@ -1059,6 +1068,79 @@ describe('/api/articles', () => {
     expect(json.ok).toBe(false);
     expect(json.error.fields.patch).toBeTruthy();
     expect(bulkPatchArticlesMock).not.toHaveBeenCalled();
+  });
+
+  it('POST /:id/tags attaches a normalized tag', async () => {
+    attachArticleTagMock.mockResolvedValue({
+      id: '00000000-0000-4000-8000-000000000001',
+      name: 'AI',
+      slug: 'ai',
+      color: null,
+    });
+    const mod = await import('../../../../app/api/articles/[id]/tags/route');
+
+    const res = await mod.POST(
+      new Request('http://localhost/api/articles/3001/tags', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: ' AI ' }),
+      }),
+      { params: Promise.resolve({ id: '3001' }) },
+    );
+    const json = await res.json();
+
+    expect(json.ok).toBe(true);
+    expect(json.data.tag).toEqual({
+      id: '00000000-0000-4000-8000-000000000001',
+      name: 'AI',
+      slug: 'ai',
+      color: null,
+    });
+    expect(attachArticleTagMock).toHaveBeenCalledWith(pool, '3001', 'AI');
+  });
+
+  it('POST /:id/tags rejects empty tag names', async () => {
+    const mod = await import('../../../../app/api/articles/[id]/tags/route');
+
+    const res = await mod.POST(
+      new Request('http://localhost/api/articles/3001/tags', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: '   ' }),
+      }),
+      { params: Promise.resolve({ id: '3001' }) },
+    );
+    const json = await res.json();
+
+    expect(json.ok).toBe(false);
+    expect(json.error.fields.name).toBeTruthy();
+    expect(attachArticleTagMock).not.toHaveBeenCalled();
+  });
+
+  it('DELETE /:id/tags/:tagId detaches a tag idempotently', async () => {
+    detachArticleTagMock.mockResolvedValue({ removed: true });
+    const mod = await import('../../../../app/api/articles/[id]/tags/[tagId]/route');
+
+    const res = await mod.DELETE(
+      new Request(
+        'http://localhost/api/articles/3001/tags/00000000-0000-4000-8000-000000000001',
+        { method: 'DELETE' },
+      ),
+      {
+        params: Promise.resolve({
+          id: '3001',
+          tagId: '00000000-0000-4000-8000-000000000001',
+        }),
+      },
+    );
+    const json = await res.json();
+
+    expect(json).toEqual({ ok: true, data: { removed: true } });
+    expect(detachArticleTagMock).toHaveBeenCalledWith(
+      pool,
+      '3001',
+      '00000000-0000-4000-8000-000000000001',
+    );
   });
 
   it('POST /:id/fulltext returns enqueued=false when disabled', async () => {

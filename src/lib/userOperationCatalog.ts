@@ -22,6 +22,8 @@ export type UserOperationActionKey =
   | 'article.toggleRead'
   | 'article.markAllRead'
   | 'article.bulkPatch'
+  | 'articleTag.add'
+  | 'articleTag.remove'
   | 'article.toggleStar'
   | 'article.toggleReadLater'
   | 'article.archive'
@@ -193,6 +195,24 @@ const catalog: Record<UserOperationActionKey, UserOperationCatalogEntry> = {
       return `已批量更新 ${count} 篇文章`;
     },
     errorPrefix: () => '批量更新文章失败',
+  },
+  'articleTag.add': {
+    mode: 'immediate',
+    category: 'article',
+    successMessage: (context) => {
+      const name = getStringContextValue(context, 'name');
+      return name ? `已添加标签 ${name}` : '已添加标签';
+    },
+    errorPrefix: () => '添加标签失败',
+  },
+  'articleTag.remove': {
+    mode: 'immediate',
+    category: 'article',
+    successMessage: (context) => {
+      const name = getStringContextValue(context, 'name');
+      return name ? `已移除标签 ${name}` : '已移除标签';
+    },
+    errorPrefix: () => '移除标签失败',
   },
   'article.toggleStar': {
     mode: 'immediate',

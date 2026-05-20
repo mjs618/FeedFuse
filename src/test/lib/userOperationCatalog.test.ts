@@ -59,6 +59,19 @@ describe('userOperationCatalog', () => {
     );
   });
 
+  it('renders article tag operation messages', () => {
+    expect(renderUserOperationSuccess('articleTag.add', { name: 'AI' })).toBe('已添加标签 AI');
+    expect(renderUserOperationSuccess('articleTag.remove', { name: 'AI' })).toBe(
+      '已移除标签 AI',
+    );
+    expect(renderUserOperationFailure('articleTag.add', undefined, { message: 'boom' })).toContain(
+      '添加标签失败',
+    );
+    expect(
+      renderUserOperationFailure('articleTag.remove', undefined, { message: 'boom' }),
+    ).toContain('移除标签失败');
+  });
+
   it('renders distinct archive operation messages for archive and unarchive contexts', () => {
     expect(getUserOperationCatalogEntry('article.archive')).toMatchObject({
       mode: 'immediate',
