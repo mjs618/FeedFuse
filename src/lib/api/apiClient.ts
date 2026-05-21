@@ -1,9 +1,11 @@
 import ky from 'ky';
 import type {
   Article,
+  ArticleTag,
   Category,
   Feed,
   PersistedSettings,
+  ReaderTag,
   SystemLogsPage,
 } from '@/types';
 import { notifyApiError } from './apiErrorNotifier';
@@ -423,6 +425,7 @@ export interface ReaderSnapshotDto {
     lastFetchRawError: string | null;
     unreadCount: number;
   }>;
+  tags: ReaderTagDto[];
   articles: {
     items: Array<{
       id: string;
@@ -435,6 +438,7 @@ export interface ReaderSnapshotDto {
       author: string | null;
       publishedAt: string | null;
       link: string | null;
+      tags?: ArticleTagDto[];
       filterStatus: 'pending' | 'passed' | 'filtered' | 'error';
       isFiltered: boolean;
       filteredBy: string[];
@@ -792,6 +796,9 @@ export type ArticlePatchInput = {
   isStarred?: boolean;
 };
 
+export type ArticleTagDto = ArticleTag;
+export type ReaderTagDto = ReaderTag;
+
 export async function patchArticle(
   articleId: string,
   input: ArticlePatchInput,
@@ -820,6 +827,39 @@ export async function bulkPatchArticles(
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ articleIds, patch }),
     },
+    options,
+  );
+}
+
+export async function getTags(options?: RequestApiOptions): Promise<{ tags: ReaderTagDto[] }> {
+  return requestApi('/api/tags', undefined, options);
+}
+
+export async function addArticleTag(
+  articleId: string,
+  name: string,
+  options?: RequestApiOptions,
+): Promise<ArticleTagDto> {
+  const result = await requestApi<{ tag: ArticleTagDto }>(
+    `/api/articles/${encodeURIComponent(articleId)}/tags`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name }),
+    },
+    options,
+  );
+  return result.tag;
+}
+
+export async function removeArticleTag(
+  articleId: string,
+  tagId: string,
+  options?: RequestApiOptions,
+): Promise<{ removed: true }> {
+  return requestApi(
+    `/api/articles/${encodeURIComponent(articleId)}/tags/${encodeURIComponent(tagId)}`,
+    { method: 'DELETE' },
     options,
   );
 }
@@ -877,6 +917,7 @@ export interface ArticleDto {
   bodyTranslationEligible?: boolean;
   bodyTranslationBlockedReason?: string | null;
   aiDigestSources?: ArticleAiDigestSourceDto[] | null;
+  tags?: ArticleTagDto[];
 }
 
 export interface ArticleAiDigestSourceDto {
@@ -1244,6 +1285,7 @@ export function mapSnapshotArticleItem(dto: ReaderSnapshotDto['articles']['items
     author: dto.author ?? undefined,
     publishedAt: dto.publishedAt ?? new Date().toISOString(),
     link: dto.link ?? '',
+    tags: dto.tags ?? [],
     filterStatus: dto.filterStatus,
     isFiltered: dto.isFiltered,
     filteredBy: dto.filteredBy,
@@ -1275,6 +1317,7 @@ export function mapArticleDto(dto: ArticleDto): Article {
     author: dto.author ?? undefined,
     publishedAt: dto.publishedAt ?? new Date().toISOString(),
     link: dto.link ?? '',
+    tags: dto.tags ?? [],
     filterStatus: dto.filterStatus,
     isFiltered: dto.isFiltered,
     filteredBy: dto.filteredBy,

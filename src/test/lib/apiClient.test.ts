@@ -336,6 +336,78 @@ it('mapArticleDto preserves read later and archive state', () => {
   expect(mapped.archivedAt).toBe('2026-05-02T00:00:00.000Z');
 });
 
+it('maps snapshot and detail article tags', async () => {
+  const { mapSnapshotArticleItem, mapArticleDto } = await import('@/lib/api/apiClient');
+  const tags = [{ id: 'tag-1', name: 'AI', slug: 'ai', color: null }];
+
+  expect(
+    mapSnapshotArticleItem({
+      id: '3001',
+      feedId: 'feed-1',
+      title: 'Article',
+      titleOriginal: 'Article',
+      titleZh: null,
+      summary: null,
+      previewImage: null,
+      author: null,
+      publishedAt: null,
+      link: null,
+      filterStatus: 'passed',
+      isFiltered: false,
+      filteredBy: [],
+      isRead: false,
+      isReadLater: false,
+      readLaterAt: null,
+      isArchived: false,
+      archivedAt: null,
+      isStarred: false,
+      bodyTranslationEligible: true,
+      bodyTranslationBlockedReason: null,
+      aiSummarySession: null,
+      tags,
+    }).tags,
+  ).toEqual(tags);
+
+  expect(
+    mapArticleDto({
+      id: '3001',
+      feedId: 'feed-1',
+      dedupeKey: 'guid:3001',
+      title: 'Article',
+      titleOriginal: 'Article',
+      titleZh: null,
+      link: null,
+      author: null,
+      publishedAt: null,
+      contentHtml: null,
+      contentFullHtml: null,
+      contentFullFetchedAt: null,
+      contentFullError: null,
+      contentFullSourceUrl: null,
+      aiSummary: null,
+      aiSummaryModel: null,
+      aiSummarizedAt: null,
+      aiTranslationBilingualHtml: null,
+      aiTranslationZhHtml: null,
+      aiTranslationModel: null,
+      aiTranslatedAt: null,
+      summary: null,
+      filterStatus: 'passed',
+      isFiltered: false,
+      filteredBy: [],
+      isRead: false,
+      readAt: null,
+      isReadLater: false,
+      readLaterAt: null,
+      isArchived: false,
+      archivedAt: null,
+      isStarred: false,
+      starredAt: null,
+      tags,
+    }).tags,
+  ).toEqual(tags);
+});
+
 it('mapArticleDto keeps ai summary rawErrorMessage', () => {
   const mapped = mapArticleDto({
     id: 'a',
@@ -870,6 +942,45 @@ it('bulkPatchArticles posts selected article ids and patch', async () => {
       patch: { isRead: true },
     }),
   );
+});
+
+it('sends article tag add and remove requests', async () => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          data: { tag: { id: 'tag-1', name: 'AI', slug: 'ai', color: null } },
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      ),
+    )
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true, data: { removed: true } }), {
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+  vi.stubGlobal('fetch', fetchMock);
+  const { addArticleTag, removeArticleTag } = await import('@/lib/api/apiClient');
+
+  await expect(addArticleTag('3001', 'AI', { notifyOnError: false })).resolves.toEqual({
+    id: 'tag-1',
+    name: 'AI',
+    slug: 'ai',
+    color: null,
+  });
+  await expect(removeArticleTag('3001', 'tag-1', { notifyOnError: false })).resolves.toEqual({
+    removed: true,
+  });
+
+  expect(fetchMock.mock.calls[0]?.[0]).toBeInstanceOf(Request);
+  expect((fetchMock.mock.calls[0]?.[0] as Request).url).toContain('/api/articles/3001/tags');
+  expect((fetchMock.mock.calls[0]?.[0] as Request).method).toBe('POST');
+  expect((fetchMock.mock.calls[1]?.[0] as Request).url).toContain(
+    '/api/articles/3001/tags/tag-1',
+  );
+  expect((fetchMock.mock.calls[1]?.[0] as Request).method).toBe('DELETE');
 });
 
 it('enqueueArticleFulltext sends force in request body when provided', async () => {

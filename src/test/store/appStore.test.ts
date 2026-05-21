@@ -118,6 +118,7 @@ function createSnapshotArticle(id: string, feedId: string, title: string) {
     readLaterAt: null,
     isArchived: false,
     archivedAt: null,
+    tags: [],
     bodyTranslationEligible: false,
     bodyTranslationBlockedReason: null,
   };
@@ -179,6 +180,7 @@ function createSnapshotPage(input: {
   return {
     categories: [],
     feeds: input.feeds ?? [createSnapshotFeed('feed-1', 'Example', input.totalCount ?? input.items.length)],
+    tags: [],
     articles: {
       items: input.items,
       nextCursor: input.nextCursor ?? null,
@@ -365,6 +367,89 @@ describe('appStore api integration', () => {
       actionKey: 'article.toggleReadLater',
       context: { readLater: true },
     });
+  });
+
+  it('adds an article tag into visible article, detail cache, and sidebar counts', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/articles/3001/tags') && method === 'POST') {
+        return jsonResponse({
+          ok: true,
+          data: { tag: { id: 'tag-1', name: 'AI', slug: 'ai', color: null } },
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    useAppStore.setState({
+      articles: [createSnapshotArticle('3001', 'feed-1', 'Tagged Article')],
+      articleDetailCache: {
+        '3001': {
+          ...createSnapshotArticle('3001', 'feed-1', 'Tagged Article'),
+          content: '<p>content</p>',
+          tags: [],
+        },
+      },
+      tags: [],
+    });
+
+    useAppStore.getState().addArticleTag('3001', 'AI');
+    await flushPromises();
+
+    expect(useAppStore.getState().articles[0]?.tags).toEqual([
+      { id: 'tag-1', name: 'AI', slug: 'ai', color: null },
+    ]);
+    expect(useAppStore.getState().articleDetailCache['3001']?.tags).toEqual([
+      { id: 'tag-1', name: 'AI', slug: 'ai', color: null },
+    ]);
+    expect(useAppStore.getState().tags).toEqual([
+      { id: 'tag-1', name: 'AI', slug: 'ai', color: null, articleCount: 1 },
+    ]);
+    expect(runImmediateSuccessMock).toHaveBeenCalledWith({
+      actionKey: 'articleTag.add',
+      context: { name: 'AI' },
+    });
+  });
+
+  it('removes an article from a tag view when removing that tag', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/articles/3001/tags/tag-1') && method === 'DELETE') {
+        return jsonResponse({ ok: true, data: { removed: true } });
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    useAppStore.setState({
+      selectedView: 'tag:tag-1',
+      selectedArticleId: '3001',
+      articles: [
+        {
+          ...createSnapshotArticle('3001', 'feed-1', 'Tagged Article'),
+          tags: [{ id: 'tag-1', name: 'AI', slug: 'ai', color: null }],
+        },
+        {
+          ...createSnapshotArticle('3002', 'feed-1', 'Next Article'),
+          tags: [{ id: 'tag-1', name: 'AI', slug: 'ai', color: null }],
+        },
+      ],
+      tags: [{ id: 'tag-1', name: 'AI', slug: 'ai', color: null, articleCount: 2 }],
+    });
+
+    useAppStore
+      .getState()
+      .removeArticleTag('3001', { id: 'tag-1', name: 'AI', slug: 'ai', color: null });
+    await flushPromises();
+
+    expect(useAppStore.getState().articles.map((article) => article.id)).toEqual(['3002']);
+    expect(useAppStore.getState().selectedArticleId).toBe('3002');
+    expect(useAppStore.getState().tags[0]?.articleCount).toBe(1);
   });
 
   it('bulk patches visible articles optimistically, persists de-duplicated ids, and emits success context', async () => {

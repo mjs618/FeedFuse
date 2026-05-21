@@ -33,6 +33,17 @@ export interface Category {
 
 export type Folder = Category;
 
+export interface ArticleTag {
+  id: string;
+  name: string;
+  slug: string;
+  color?: string | null;
+}
+
+export interface ReaderTag extends ArticleTag {
+  articleCount: number;
+}
+
 export interface Article {
   id: string;
   feedId: string;
@@ -49,6 +60,7 @@ export interface Article {
   author?: string;
   publishedAt: string;
   link: string;
+  tags?: ArticleTag[];
   filterStatus?: 'pending' | 'passed' | 'filtered' | 'error';
   isFiltered?: boolean;
   filteredBy?: string[];

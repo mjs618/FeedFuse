@@ -3,6 +3,7 @@ import type { Article, Category, Feed, ViewType } from '../types';
 import { useSettingsStore } from './settingsStore';
 import { AI_DIGEST_VIEW_ID, shouldUseDefaultUnreadOnly } from '@/lib/reader/view';
 import {
+  addArticleTag as addArticleTagRequest,
   bulkPatchArticles as bulkPatchArticlesRequest,
   createAiDigest,
   createFeed,
@@ -18,7 +19,10 @@ import {
   patchFeed,
   patchArticle,
   refreshFeed,
+  removeArticleTag as removeArticleTagRequest,
+  type ArticleTagDto,
   type ArticlePatchInput,
+  type ReaderTagDto,
 } from '@/lib/api/apiClient';
 import {
   runImmediateFailure,
@@ -97,6 +101,7 @@ function persistReaderSelectionToUrl(
 interface AppState {
   feeds: Feed[];
   categories: Category[];
+  tags: ReaderTagDto[];
   articles: Article[];
   articleDetailCache: Record<string, Article>;
   articleSnapshotCache: Record<string, Article[]>;
@@ -138,6 +143,8 @@ interface AppState {
   markAllAsRead: (feedId?: string) => void;
   toggleReadLater: (articleId: string) => void;
   bulkPatchArticles: (articleIds: string[], patch: ArticlePatchInput) => void;
+  addArticleTag: (articleId: string, name: string) => void;
+  removeArticleTag: (articleId: string, tag: ArticleTagDto) => void;
   archiveArticle: (articleId: string) => void;
   unarchiveArticle: (articleId: string) => void;
   addFeed: (feed: {
@@ -341,6 +348,41 @@ function updateArticleInVisibleCollections(
     ),
     articleDetailCache: updateCachedArticle(state.articleDetailCache, articleId, updater),
   };
+}
+
+function articleHasTag(article: Article | undefined, tagId: string): boolean {
+  return Boolean(article?.tags?.some((tag) => tag.id === tagId));
+}
+
+function upsertArticleTag(article: Article, tag: ArticleTagDto): Article {
+  if (articleHasTag(article, tag.id)) return article;
+  return { ...article, tags: [...(article.tags ?? []), tag] };
+}
+
+function removeTagFromArticle(article: Article, tagId: string): Article {
+  return {
+    ...article,
+    tags: (article.tags ?? []).filter((tag) => tag.id !== tagId),
+  };
+}
+
+function incrementReaderTag(tags: ReaderTagDto[], tag: ArticleTagDto): ReaderTagDto[] {
+  const existing = tags.find((item) => item.id === tag.id);
+  if (!existing) return [...tags, { ...tag, articleCount: 1 }];
+
+  return tags.map((item) =>
+    item.id === tag.id ? { ...item, articleCount: item.articleCount + 1 } : item,
+  );
+}
+
+function decrementReaderTag(tags: ReaderTagDto[], tagId: string): ReaderTagDto[] {
+  return tags
+    .map((item) =>
+      item.id === tagId
+        ? { ...item, articleCount: Math.max(0, item.articleCount - 1) }
+        : item,
+    )
+    .filter((item) => item.articleCount > 0);
 }
 
 function dedupeArticleIds(articleIds: string[]): string[] {
@@ -810,6 +852,7 @@ const initialReaderSelection = readReaderSelectionFromUrl();
 export const useAppStore = create<AppState>((set, get) => ({
   feeds: [],
   categories: [uncategorizedCategory],
+  tags: [],
   articles: [],
   // Keep article detail independent from paged list snapshots so the reader pane stays stable.
   articleDetailCache: {},
@@ -998,6 +1041,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         return {
           categories,
           feeds,
+          tags: snapshot.tags ?? state.tags,
           articles: isVisibleView ? articles : state.articles,
           articleDetailCache,
           articleSnapshotCache,
@@ -1075,6 +1119,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
         return {
           articles,
+          tags: snapshot.tags ?? currentState.tags,
           articleSnapshotCache: {
             ...currentState.articleSnapshotCache,
             [view]: articles,
@@ -1309,6 +1354,85 @@ export const useAppStore = create<AppState>((set, get) => ({
           err,
         });
         void loadCurrentSnapshotSilently(get);
+      });
+  },
+
+  addArticleTag: (articleId, name) => {
+    const stateBefore = get();
+    const articleBefore = getArticleFromCollections(
+      articleId,
+      stateBefore.articles,
+      stateBefore.articleDetailCache,
+    );
+
+    void addArticleTagRequest(articleId, name, { notifyOnError: false })
+      .then((tag) => {
+        const alreadyTagged = articleHasTag(articleBefore, tag.id);
+        set((state) => ({
+          articles: state.articles.map((article) =>
+            article.id === articleId ? upsertArticleTag(article, tag) : article,
+          ),
+          articleDetailCache: updateCachedArticle(
+            state.articleDetailCache,
+            articleId,
+            (article) => upsertArticleTag(article, tag),
+          ),
+          tags:
+            alreadyTagged || articleBefore?.isArchived
+              ? state.tags
+              : incrementReaderTag(state.tags, tag),
+        }));
+        runImmediateSuccess({ actionKey: 'articleTag.add', context: { name: tag.name } });
+      })
+      .catch((err) => {
+        runImmediateFailure({ actionKey: 'articleTag.add', context: { name }, err });
+      });
+  },
+
+  removeArticleTag: (articleId, tag) => {
+    const stateBefore = get();
+    const articleBefore = getArticleFromCollections(
+      articleId,
+      stateBefore.articles,
+      stateBefore.articleDetailCache,
+    );
+    const hadTag = articleHasTag(articleBefore, tag.id);
+
+    void removeArticleTagRequest(articleId, tag.id, { notifyOnError: false })
+      .then(() => {
+        set((state) => {
+          const isCurrentTagView = state.selectedView === `tag:${tag.id}`;
+          const articles = state.articles
+            .map((article) =>
+              article.id === articleId ? removeTagFromArticle(article, tag.id) : article,
+            )
+            .filter((article) => (isCurrentTagView ? article.id !== articleId : true));
+
+          return {
+            articles,
+            articleDetailCache: updateCachedArticle(
+              state.articleDetailCache,
+              articleId,
+              (article) => removeTagFromArticle(article, tag.id),
+            ),
+            tags:
+              hadTag && !articleBefore?.isArchived
+                ? decrementReaderTag(state.tags, tag.id)
+                : state.tags,
+            selectedArticleId:
+              isCurrentTagView && state.selectedArticleId === articleId
+                ? (articles.find((article) => !article.isArchived)?.id ?? null)
+                : state.selectedArticleId,
+          };
+        });
+        runImmediateSuccess({ actionKey: 'articleTag.remove', context: { name: tag.name } });
+      })
+      .catch((err) => {
+        runImmediateFailure({
+          actionKey: 'articleTag.remove',
+          context: { name: tag.name },
+          err,
+        });
       });
   },
 
