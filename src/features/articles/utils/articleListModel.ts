@@ -1,5 +1,5 @@
 import type { Article, Feed, ViewType } from '../../../types';
-import { AI_DIGEST_VIEW_ID, ARCHIVED_VIEW_ID, READ_LATER_VIEW_ID } from '@/lib/reader/view';
+import { AI_DIGEST_VIEW_ID, ARCHIVED_VIEW_ID, READ_LATER_VIEW_ID, TAG_VIEW_PREFIX } from '@/lib/reader/view';
 import { getArticleSectionHeading, getLocalDayKey } from '../../../utils/date';
 
 export interface ArticlePreviewImage {
@@ -72,6 +72,11 @@ export function buildArticleListDerivedState(
   const viewScopedArticles: Article[] = [];
   for (const article of input.articles) {
     if (input.selectedView === 'all' || input.selectedView === 'unread') {
+      viewScopedArticles.push(article);
+      continue;
+    }
+
+    if (input.selectedView.startsWith(TAG_VIEW_PREFIX)) {
       viewScopedArticles.push(article);
       continue;
     }

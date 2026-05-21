@@ -188,12 +188,71 @@ describe('ArticleList', () => {
     };
   }
 
+  function snapshotResponseFromStore() {
+    const state = useAppStore.getState();
+
+    return jsonResponse({
+      ok: true,
+      data: {
+        categories: state.categories.map((category, index) => ({
+          id: category.id,
+          name: category.name,
+          position: index,
+        })),
+        feeds: state.feeds.map((feed) => ({
+          id: feed.id,
+          title: feed.title,
+          url: feed.url,
+          siteUrl: feed.siteUrl ?? null,
+          iconUrl: feed.icon ?? null,
+          enabled: feed.enabled,
+          fullTextOnOpenEnabled: Boolean(feed.fullTextOnOpenEnabled),
+          aiSummaryOnOpenEnabled: Boolean(feed.aiSummaryOnOpenEnabled),
+          aiSummaryOnFetchEnabled: Boolean(feed.aiSummaryOnFetchEnabled),
+          bodyTranslateOnFetchEnabled: Boolean(feed.bodyTranslateOnFetchEnabled),
+          bodyTranslateOnOpenEnabled: Boolean(feed.bodyTranslateOnOpenEnabled),
+          titleTranslateEnabled: Boolean(feed.titleTranslateEnabled),
+          bodyTranslateEnabled: Boolean(feed.bodyTranslateEnabled),
+          articleListDisplayMode: feed.articleListDisplayMode ?? 'card',
+          categoryId: feed.categoryId ?? null,
+          fetchIntervalMinutes: 30,
+          lastFetchStatus: feed.fetchStatus ?? null,
+          lastFetchError: feed.fetchError ?? null,
+          lastFetchRawError: feed.fetchRawError ?? null,
+          unreadCount: feed.unreadCount,
+        })),
+        articles: {
+          items: state.articles.map((article) => ({
+            id: article.id,
+            feedId: article.feedId,
+            title: article.title,
+            titleOriginal: article.titleOriginal ?? null,
+            titleZh: article.titleZh ?? null,
+            summary: article.summary,
+            author: article.author ?? null,
+            publishedAt: article.publishedAt,
+            link: article.link,
+            isRead: article.isRead,
+            isStarred: article.isStarred,
+            previewImage: article.previewImage ?? null,
+            tags: article.tags ?? [],
+          })),
+          nextCursor: null,
+        },
+        tags: state.tags,
+      },
+    });
+  }
+
   beforeEach(async () => {
     vi.resetModules();
     fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = getFetchCallUrl(input);
       const method = getFetchCallMethod(input, init);
 
+      if (url.includes('/api/reader/snapshot') && method === 'GET') {
+        return snapshotResponseFromStore();
+      }
       if (url.includes('/api/feeds/refresh') && method === 'POST') {
         return jsonResponse({ ok: true, data: { enqueued: true, jobId: 'job-1' } });
       }
@@ -325,6 +384,54 @@ describe('ArticleList', () => {
     expect(screen.getByText('译文标题')).toBeInTheDocument();
     expect(screen.getByText('Only original title')).toBeInTheDocument();
     expect(screen.queryByText('Original title')).not.toBeInTheDocument();
+  });
+
+  it('renders article tag badges and tag view title', () => {
+    useAppStore.setState({
+      selectedView: 'tag:tag-1',
+      showUnreadOnly: false,
+      tags: [{ id: 'tag-1', name: 'AI', slug: 'ai', color: null, articleCount: 1 }],
+      articles: [
+        {
+          id: '3001',
+          feedId: 'feed-1',
+          title: 'Tagged Article',
+          content: '',
+          summary: 'Summary',
+          publishedAt: new Date('2026-02-25T00:00:00.000Z').toISOString(),
+          link: 'https://example.com/1',
+          isRead: false,
+          isStarred: false,
+          tags: [
+            { id: 'tag-1', name: 'AI', slug: 'ai', color: null },
+            { id: 'tag-2', name: 'Research', slug: 'research', color: null },
+            { id: 'tag-3', name: 'Longform', slug: 'longform', color: null },
+          ],
+        },
+      ],
+    });
+
+    renderWithNotifications();
+
+    expect(screen.getByRole('heading', { level: 2, name: 'AI' })).toBeInTheDocument();
+    expect(screen.getByText('Tagged Article')).toBeInTheDocument();
+    expect(screen.getByText('Research')).toBeInTheDocument();
+    expect(screen.getByText('+1')).toBeInTheDocument();
+  });
+
+  it('renders an empty tag view message', () => {
+    useAppStore.setState({
+      selectedView: 'tag:tag-1',
+      showUnreadOnly: false,
+      tags: [{ id: 'tag-1', name: 'AI', slug: 'ai', color: null, articleCount: 0 }],
+      articles: [],
+      selectedArticleId: null,
+    });
+
+    renderWithNotifications();
+
+    expect(screen.getByRole('heading', { level: 2, name: 'AI' })).toBeInTheDocument();
+    expect(screen.getByText('这个标签下暂时没有可见文章')).toBeInTheDocument();
   });
 
   it('keeps selected read article visible when showUnreadOnly is enabled (fresh session)', () => {

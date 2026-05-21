@@ -153,9 +153,11 @@ describe('FeedList manage', () => {
             link: article.link,
             isRead: article.isRead,
             isStarred: article.isStarred,
+            tags: article.tags ?? [],
           })),
           nextCursor: null,
         },
+        tags: state.tags,
       },
     });
   }
@@ -1966,6 +1968,20 @@ describe('FeedList manage', () => {
 
     expect(await screen.findByRole('button', { name: '添加 RSS 源' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '添加智能报告' })).toBeInTheDocument();
+  });
+
+  it('renders tag rows and navigates to a tag view', () => {
+    useAppStore.setState({
+      tags: [{ id: 'tag-1', name: 'AI', slug: 'ai', color: null, articleCount: 2 }],
+      selectedView: 'all',
+    });
+
+    render(<FeedList />);
+
+    expect(screen.getByText('标签')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /AI/ }));
+
+    expect(useAppStore.getState().selectedView).toBe('tag:tag-1');
   });
 
   it('does not commit again when unrelated app store state changes', () => {

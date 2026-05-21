@@ -1,5 +1,5 @@
 import dynamic from 'next/dynamic';
-import { AlertCircle, Archive, ArrowDown, ArrowUp, ChevronDown, ChevronRight, Clock3, FileText, FolderTree, Languages, Newspaper, PencilLine, Plus, Power, Sparkles, Star, Trash2 } from 'lucide-react';
+import { AlertCircle, Archive, ArrowDown, ArrowUp, ChevronDown, ChevronRight, Clock3, FileText, FolderTree, Languages, Newspaper, PencilLine, Plus, Power, Sparkles, Star, Tag, Trash2 } from 'lucide-react';
 import { type KeyboardEvent, useMemo, useState } from 'react';
 import { useAppStore } from '../../../store/appStore';
 import type { ViewType } from '../../../types';
@@ -77,6 +77,7 @@ export default function FeedList({
 }: FeedListProps) {
   const appCategories = useAppStore((state) => state.categories);
   const feeds = useAppStore((state) => state.feeds);
+  const tags = useAppStore((state) => state.tags);
   const readLaterCount = useAppStore((state) =>
     state.articles.reduce(
       (count, article) => count + (article.isReadLater && !article.isArchived ? 1 : 0),
@@ -449,6 +450,53 @@ export default function FeedList({
             </button>
           ))}
         </div>
+
+        {tags.length > 0 ? (
+          <div className="px-2 pb-2">
+            <div className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+              标签
+            </div>
+            <div className="space-y-0.5">
+              {tags.map((tag) => {
+                const viewId = `tag:${tag.id}`;
+                const selected = renderedSelectedView === viewId;
+
+                return (
+                  <button
+                    key={tag.id}
+                    type="button"
+                    onClick={() => setSelectedView(viewId)}
+                    aria-current={selected ? 'true' : undefined}
+                    className={cn(
+                      'flex w-full items-center justify-between gap-2 rounded-xl border border-transparent px-3 py-2 text-left text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset dark:border-white/[0.03]',
+                      selected
+                        ? READER_PANE_ACTIVE_ITEM_CLASS_NAME
+                        : cn(
+                            'text-foreground hover:text-accent-foreground',
+                            READER_PANE_HOVER_BACKGROUND_CLASS_NAME,
+                          ),
+                    )}
+                  >
+                    <div className="flex min-w-0 items-center">
+                      <Tag aria-hidden="true" className="mr-2 inline-block h-4 w-4 shrink-0 align-[-2px]" />
+                      <span className="truncate">{tag.name}</span>
+                    </div>
+                    <Badge
+                      variant="secondary"
+                      aria-hidden="true"
+                      className={cn(
+                        'h-5 min-w-6 shrink-0 justify-center px-1.5 text-[10px] font-semibold tabular-nums',
+                        LEFT_RAIL_UNREAD_BADGE_CLASS_NAME,
+                      )}
+                    >
+                      {tag.articleCount}
+                    </Badge>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
 
         <div className="flex-1 overflow-y-auto px-2 pb-3">
           {feedGroups.map((category) => {

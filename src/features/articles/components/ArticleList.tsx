@@ -48,6 +48,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import {
   AI_DIGEST_VIEW_ID,
+  TAG_VIEW_PREFIX,
   isAggregateView as isAggregateReaderView,
   shouldUseDefaultUnreadOnly,
 } from "@/lib/reader/view";
@@ -191,6 +192,7 @@ export default function ArticleList({
 }: ArticleListProps = {}) {
   const articles = useAppStore((state) => state.articles);
   const feeds = useAppStore((state) => state.feeds);
+  const tags = useAppStore((state) => state.tags);
   const selectedView = useAppStore((state) => state.selectedView);
   const selectedArticleId = useAppStore((state) => state.selectedArticleId);
   const setSelectedArticle = useAppStore((state) => state.setSelectedArticle);
@@ -637,9 +639,14 @@ export default function ArticleList({
     return () => window.removeEventListener("keydown", handleSelectionShortcuts);
   }, [clearSelectionMode, selectedArticleId, selectionMode, toggleSelectedArticle]);
 
+  const tagViewId = renderedSelectedView.startsWith(TAG_VIEW_PREFIX)
+    ? renderedSelectedView.slice(TAG_VIEW_PREFIX.length)
+    : null;
+  const selectedTag = tagViewId ? tags.find((tag) => tag.id === tagViewId) ?? null : null;
   const selectedFeed = isAggregateView ? null : feedById.get(renderedSelectedView) ?? selectedFeedFromStore;
   const headerTitle =
-    renderedSelectedView === AI_DIGEST_VIEW_ID ? "智能报告" : (selectedFeed?.title ?? "文章");
+    selectedTag?.name ??
+    (renderedSelectedView === AI_DIGEST_VIEW_ID ? "智能报告" : (selectedFeed?.title ?? "文章"));
   const isAiDigestView = Boolean(selectedFeed && (selectedFeed.kind ?? "rss") === "ai_digest");
 
   useEffect(() => {
@@ -716,6 +723,10 @@ export default function ArticleList({
 
     if (renderedSelectedView === AI_DIGEST_VIEW_ID) {
       return "还没有智能报告";
+    }
+
+    if (selectedTag) {
+      return "这个标签下暂时没有可见文章";
     }
 
     if (selectedFeed) {
@@ -1110,6 +1121,33 @@ export default function ArticleList({
     );
   };
 
+  const renderArticleTags = (article: (typeof filteredArticles)[number]) => {
+    const articleTags = article.tags ?? [];
+    if (articleTags.length === 0) return null;
+
+    const visibleTags = articleTags.slice(0, 2);
+    const overflowCount = articleTags.length - visibleTags.length;
+
+    return (
+      <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1">
+        {visibleTags.map((tag) => (
+          <Badge
+            key={tag.id}
+            variant="secondary"
+            className="h-5 max-w-28 truncate px-1.5 text-[10px] font-medium"
+          >
+            {tag.name}
+          </Badge>
+        ))}
+        {overflowCount > 0 ? (
+          <Badge variant="secondary" className="h-5 px-1.5 text-[10px] font-medium">
+            +{overflowCount}
+          </Badge>
+        ) : null}
+      </div>
+    );
+  };
+
   const renderVirtualRow = (row: (typeof visibleRows)[number]) => {
     if (row.type === "section") {
       return (
@@ -1182,6 +1220,7 @@ export default function ArticleList({
             >
               {displayTitle}
             </span>
+            {renderArticleTags(article)}
             <div className="mt-1 flex items-center justify-between gap-3 text-[11px]">
               <div className="min-w-0 flex items-center gap-2">
                 <span
@@ -1272,6 +1311,7 @@ export default function ArticleList({
             >
               {displayTitle}
             </h3>
+            {renderArticleTags(article)}
 
             <p
               data-testid={`article-card-${article.id}-summary`}
