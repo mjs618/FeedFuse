@@ -15,10 +15,13 @@ import {
   Download,
   FileText,
   Languages,
+  Plus,
   Search,
   Settings as SettingsIcon,
   Sparkles,
   Star,
+  Tag,
+  X,
 } from "lucide-react";
 import { getSelectedArticleFromState, useAppStore } from "../../../store/appStore";
 import { useSettingsStore } from "../../../store/settingsStore";
@@ -102,6 +105,8 @@ export default function ArticleView({
   const archiveArticle = useAppStore((state) => state.archiveArticle);
   const refreshArticle = useAppStore((state) => state.refreshArticle);
   const openArticleInReader = useAppStore((state) => state.openArticleInReader);
+  const addArticleTag = useAppStore((state) => state.addArticleTag);
+  const removeArticleTag = useAppStore((state) => state.removeArticleTag);
   const general = useSettingsStore((state) => state.persistedSettings.general);
   const autoMarkReadEnabled = useSettingsStore(
     (state) => state.persistedSettings.general.autoMarkReadEnabled,
@@ -125,6 +130,8 @@ export default function ArticleView({
   const [scrollAssistPercent, setScrollAssistPercent] = useState(0);
   const [articleTitleVisible, setArticleTitleVisible] = useState(true);
   const [hasScrollableContent, setHasScrollableContent] = useState(false);
+  const [tagInput, setTagInput] = useState("");
+  const [tagInputError, setTagInputError] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState<ImagePreviewState | null>(
     null,
   );
@@ -540,6 +547,30 @@ export default function ArticleView({
     archiveArticle(article.id);
   }
 
+  function submitTag() {
+    if (!article) return;
+
+    const name = tagInput.trim().replace(/\s+/g, " ");
+    if (!name) {
+      setTagInputError("请输入标签名称");
+      return;
+    }
+
+    if (
+      (article.tags ?? []).some(
+        (tag) => tag.name.toLowerCase() === name.toLowerCase(),
+      )
+    ) {
+      setTagInput("");
+      setTagInputError(null);
+      return;
+    }
+
+    addArticleTag(article.id, name);
+    setTagInput("");
+    setTagInputError(null);
+  }
+
   async function onAiDigestSourceClick(source: ArticleAiDigestSource) {
     // Preserve the current digest article URL entry so browser back can return to it.
     await openArticleInReader({
@@ -547,6 +578,63 @@ export default function ArticleView({
       articleId: source.articleId,
       articleHistory: "push",
     });
+  }
+
+  function renderTagEditor() {
+    if (!article) return null;
+
+    return (
+      <div className="mt-3 flex flex-col gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+          {(article.tags ?? []).map((tag) => (
+            <span
+              key={tag.id}
+              className="inline-flex max-w-40 items-center gap-1 rounded-md border border-border/70 bg-muted/50 px-2 py-0.5 text-xs text-muted-foreground"
+            >
+              <Tag className="h-3 w-3 shrink-0" aria-hidden="true" />
+              <span className="truncate">{tag.name}</span>
+              <button
+                type="button"
+                aria-label={`移除标签 ${tag.name}`}
+                onClick={() => removeArticleTag(article.id, tag)}
+                className="rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                <X className="h-3 w-3" aria-hidden="true" />
+              </button>
+            </span>
+          ))}
+          <div className="flex items-center gap-1">
+            <input
+              aria-label="添加标签"
+              value={tagInput}
+              onChange={(event) => {
+                setTagInput(event.target.value);
+                setTagInputError(null);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  submitTag();
+                }
+              }}
+              className="h-7 w-28 rounded-md border border-border bg-background px-2 text-xs outline-none transition-colors focus:border-ring"
+              placeholder="添加标签"
+            />
+            <button
+              type="button"
+              aria-label="添加标签"
+              onClick={submitTag}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            >
+              <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+        {tagInputError ? (
+          <p className="text-xs text-destructive">{tagInputError}</p>
+        ) : null}
+      </div>
+    );
   }
 
   function renderDesktopToolbar() {
@@ -986,6 +1074,8 @@ export default function ArticleView({
                   )}
                 </div>
               </div>
+
+              {renderTagEditor()}
 
               {!showDesktopToolbar ? (
                 <div className="flex flex-wrap items-center gap-2">
