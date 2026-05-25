@@ -11,6 +11,7 @@ import type {
 import { notifyApiError } from './apiErrorNotifier';
 import { normalizeFeedAutoTriggerFlags } from '@/lib/feeds/feedAutoTriggerPolicy';
 import { AI_DIGEST_ICON_URL } from '@/lib/feeds/feedIcons';
+import type { TagColorPreset } from '@/lib/reader/tagColors';
 import { isRecord } from '@/lib/utils';
 
 export interface ApiErrorPayload {
@@ -799,6 +800,16 @@ export type ArticlePatchInput = {
 export type ArticleTagDto = ArticleTag;
 export type ReaderTagDto = ReaderTag;
 
+export interface UpdateTagInput {
+  name?: string;
+  color?: TagColorPreset | null;
+}
+
+export interface DeleteTagResult {
+  removed: boolean;
+  affectedArticleCount: number;
+}
+
 export async function patchArticle(
   articleId: string,
   input: ArticlePatchInput,
@@ -833,6 +844,34 @@ export async function bulkPatchArticles(
 
 export async function getTags(options?: RequestApiOptions): Promise<{ tags: ReaderTagDto[] }> {
   return requestApi('/api/tags', undefined, options);
+}
+
+export async function updateTag(
+  tagId: string,
+  patch: UpdateTagInput,
+  options?: RequestApiOptions,
+): Promise<ArticleTagDto> {
+  const result = await requestApi<{ tag: ArticleTagDto }>(
+    `/api/tags/${encodeURIComponent(tagId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(patch),
+    },
+    options,
+  );
+  return result.tag;
+}
+
+export async function deleteTag(
+  tagId: string,
+  options?: RequestApiOptions,
+): Promise<DeleteTagResult> {
+  return requestApi(
+    `/api/tags/${encodeURIComponent(tagId)}`,
+    { method: 'DELETE' },
+    options,
+  );
 }
 
 export async function addArticleTag(

@@ -53,6 +53,19 @@ function getFetchCallHeader(call: unknown[], name: string): string | undefined {
   return undefined;
 }
 
+async function getFetchCallBodyText(call: unknown[]): Promise<string | undefined> {
+  const [input, init] = call;
+  if (typeof Request !== 'undefined' && input instanceof Request) {
+    return input.clone().text();
+  }
+  if (init && typeof init === 'object' && 'body' in init) {
+    const body = (init as { body?: unknown }).body;
+    if (typeof body === 'string') return body;
+    if (body instanceof URLSearchParams) return body.toString();
+  }
+  return undefined;
+}
+
 describe('mapFeedDto', () => {
   it('maps kind', () => {
     const mapped = mapFeedDto(
@@ -981,6 +994,60 @@ it('sends article tag add and remove requests', async () => {
     '/api/articles/3001/tags/tag-1',
   );
   expect((fetchMock.mock.calls[1]?.[0] as Request).method).toBe('DELETE');
+});
+
+it('updateTag PATCHes tag fields and returns the updated tag', async () => {
+  let sentBodyText: string | undefined;
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    sentBodyText = await getFetchCallBodyText([input, init]);
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        data: { tag: { id: 'tag-1', name: 'AI', slug: 'ai', color: 'blue' } },
+      }),
+      { headers: { 'content-type': 'application/json' } },
+    );
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  const { updateTag } = await import('@/lib/api/apiClient');
+
+  await expect(
+    updateTag('tag-1', { name: 'AI', color: 'blue' }, { notifyOnError: false }),
+  ).resolves.toEqual({
+    id: 'tag-1',
+    name: 'AI',
+    slug: 'ai',
+    color: 'blue',
+  });
+
+  const firstCall = fetchMock.mock.calls[0] ?? [];
+  expect(getFetchCallUrl(firstCall[0])).toContain('/api/tags/tag-1');
+  expect(getFetchCallMethod(firstCall)).toBe('PATCH');
+  expect(getFetchCallHeader(firstCall, 'content-type')).toBe('application/json');
+  expect(sentBodyText).toBe(JSON.stringify({ name: 'AI', color: 'blue' }));
+});
+
+it('deleteTag DELETEs a tag and returns the deletion result', async () => {
+  const fetchMock = vi.fn(async () => {
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        data: { removed: true, affectedArticleCount: 2 },
+      }),
+      { headers: { 'content-type': 'application/json' } },
+    );
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  const { deleteTag } = await import('@/lib/api/apiClient');
+
+  await expect(deleteTag('tag-1', { notifyOnError: false })).resolves.toEqual({
+    removed: true,
+    affectedArticleCount: 2,
+  });
+
+  const firstCall = fetchMock.mock.calls[0] ?? [];
+  expect(getFetchCallUrl(firstCall[0])).toContain('/api/tags/tag-1');
+  expect(getFetchCallMethod(firstCall)).toBe('DELETE');
 });
 
 it('enqueueArticleFulltext sends force in request body when provided', async () => {

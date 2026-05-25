@@ -24,6 +24,8 @@ export type UserOperationActionKey =
   | 'article.bulkPatch'
   | 'articleTag.add'
   | 'articleTag.remove'
+  | 'tag.update'
+  | 'tag.delete'
   | 'article.toggleStar'
   | 'article.toggleReadLater'
   | 'article.archive'
@@ -213,6 +215,24 @@ const catalog: Record<UserOperationActionKey, UserOperationCatalogEntry> = {
       return name ? `已移除标签 ${name}` : '已移除标签';
     },
     errorPrefix: () => '移除标签失败',
+  },
+  'tag.update': {
+    mode: 'immediate',
+    category: 'article',
+    successMessage: (context) => {
+      const name = getStringContextValue(context, 'name');
+      return name ? `已更新标签 ${name}` : '已更新标签';
+    },
+    errorPrefix: () => '更新标签失败',
+  },
+  'tag.delete': {
+    mode: 'immediate',
+    category: 'article',
+    successMessage: (context) => {
+      const name = getStringContextValue(context, 'name');
+      return name ? `已删除标签 ${name}` : '已删除标签';
+    },
+    errorPrefix: () => '删除标签失败',
   },
   'article.toggleStar': {
     mode: 'immediate',

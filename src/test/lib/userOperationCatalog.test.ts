@@ -72,6 +72,25 @@ describe('userOperationCatalog', () => {
     ).toContain('移除标签失败');
   });
 
+  it('renders tag management operation messages', () => {
+    expect(getUserOperationCatalogEntry('tag.update')).toMatchObject({
+      mode: 'immediate',
+      category: 'article',
+    });
+    expect(getUserOperationCatalogEntry('tag.delete')).toMatchObject({
+      mode: 'immediate',
+      category: 'article',
+    });
+    expect(renderUserOperationSuccess('tag.update', { name: 'AI' })).toBe('已更新标签 AI');
+    expect(renderUserOperationSuccess('tag.delete', { name: 'AI' })).toBe('已删除标签 AI');
+    expect(renderUserOperationFailure('tag.update', undefined, { message: 'boom' })).toContain(
+      '更新标签失败',
+    );
+    expect(renderUserOperationFailure('tag.delete', undefined, { message: 'boom' })).toContain(
+      '删除标签失败',
+    );
+  });
+
   it('renders distinct archive operation messages for archive and unarchive contexts', () => {
     expect(getUserOperationCatalogEntry('article.archive')).toMatchObject({
       mode: 'immediate',
