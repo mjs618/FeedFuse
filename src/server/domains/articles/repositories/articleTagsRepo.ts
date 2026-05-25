@@ -1,5 +1,7 @@
 import type { Pool, PoolClient } from 'pg';
 
+import { isTagColorPreset } from '@/lib/reader/tagColors';
+
 export const TAG_NAME_MAX_LENGTH = 64;
 
 export interface ArticleTagRow {
@@ -11,6 +13,16 @@ export interface ArticleTagRow {
 
 export interface ReaderTagRow extends ArticleTagRow {
   articleCount: number;
+}
+
+export interface UpdateArticleTagPatch {
+  name?: string;
+  color?: string | null;
+}
+
+export interface DeleteArticleTagResult {
+  removed: boolean;
+  affectedArticleCount: number;
 }
 
 type DbClient = Pick<Pool, 'query'> | PoolClient;
@@ -177,4 +189,92 @@ export async function detachArticleTag(
   );
 
   return { removed: true };
+}
+
+export async function updateArticleTag(
+  pool: DbClient,
+  tagId: string,
+  patch: UpdateArticleTagPatch,
+): Promise<ArticleTagRow | null> {
+  const hasName = Object.prototype.hasOwnProperty.call(patch, 'name');
+  const hasColor = Object.prototype.hasOwnProperty.call(patch, 'color');
+
+  if (!hasName && !hasColor) {
+    throw new Error('At least one tag field is required');
+  }
+
+  const setParts: string[] = [];
+  const params: unknown[] = [];
+
+  if (hasName) {
+    const name = normalizeTagName(patch.name ?? '');
+    assertValidTagName(name);
+    const slug = slugifyTagName(name);
+
+    params.push(name);
+    setParts.push(`name = $${params.length}`);
+    params.push(slug);
+    setParts.push(`slug = $${params.length}`);
+  }
+
+  if (hasColor) {
+    const color = patch.color ?? null;
+    if (color !== null && !isTagColorPreset(color)) {
+      throw new Error('Tag color is invalid');
+    }
+
+    params.push(color);
+    setParts.push(`color = $${params.length}`);
+  }
+
+  params.push(tagId);
+  const tagIdParam = params.length;
+  const { rows } = await pool.query<ArticleTagRow>(
+    `
+      update article_tags
+      set ${setParts.join(', ')}, updated_at = now()
+      where id = $${tagIdParam}::uuid
+      returning id, name, slug, color
+    `,
+    params,
+  );
+
+  return rows[0] ?? null;
+}
+
+export async function deleteArticleTag(
+  pool: TransactionPool,
+  tagId: string,
+): Promise<DeleteArticleTagResult> {
+  const client = await pool.connect();
+
+  try {
+    await client.query('begin');
+    const countResult = await client.query<{ count: number }>(
+      `
+        select count(*)::int as count
+        from article_taggings
+        where tag_id = $1::uuid
+      `,
+      [tagId],
+    );
+    const deleteResult = await client.query(
+      `
+        delete from article_tags
+        where id = $1::uuid
+      `,
+      [tagId],
+    );
+    await client.query('commit');
+
+    return {
+      removed: (deleteResult.rowCount ?? 0) > 0,
+      affectedArticleCount: countResult.rows[0]?.count ?? 0,
+    };
+  } catch (err) {
+    await client.query('rollback');
+    throw err;
+  } finally {
+    client.release();
+  }
 }

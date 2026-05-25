@@ -130,4 +130,93 @@ describe('articleTagsRepo', () => {
     ).resolves.toEqual({ removed: true });
     expect(String(query.mock.calls[0][0])).toContain('delete from article_taggings');
   });
+
+  it('updates a tag name and color', async () => {
+    const query = vi.fn().mockResolvedValue({
+      rows: [{ id: 'tag-1', name: 'AI Research', slug: 'ai-research', color: 'blue' }],
+    });
+    const pool = { query } as never;
+    const mod = await import('@/server/domains/articles/repositories/articleTagsRepo');
+
+    const tag = await mod.updateArticleTag(pool, 'tag-1', {
+      name: '  AI   Research  ',
+      color: 'blue',
+    });
+
+    expect(tag).toEqual({ id: 'tag-1', name: 'AI Research', slug: 'ai-research', color: 'blue' });
+    expect(String(query.mock.calls[0][0]).toLowerCase()).toContain('update article_tags');
+    expect(query.mock.calls[0][1]).toEqual(['AI Research', 'ai-research', 'blue', 'tag-1']);
+  });
+
+  it('rejects invalid tag update colors before querying', async () => {
+    const query = vi.fn();
+    const pool = { query } as never;
+    const mod = await import('@/server/domains/articles/repositories/articleTagsRepo');
+
+    await expect(mod.updateArticleTag(pool, 'tag-1', { color: 'purple' })).rejects.toThrow(
+      'Tag color is invalid',
+    );
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it('rejects empty tag update patches before querying', async () => {
+    const query = vi.fn();
+    const pool = { query } as never;
+    const mod = await import('@/server/domains/articles/repositories/articleTagsRepo');
+
+    await expect(mod.updateArticleTag(pool, 'tag-1', {})).rejects.toThrow(
+      'At least one tag field is required',
+    );
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it('deletes a tag in a transaction and returns affected article count', async () => {
+    const client = {
+      query: vi
+        .fn()
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [{ count: 12 }] })
+        .mockResolvedValueOnce({ rowCount: 1 })
+        .mockResolvedValueOnce({ rows: [] }),
+      release: vi.fn(),
+    };
+    const pool = { connect: vi.fn().mockResolvedValue(client) };
+    const mod = await import('@/server/domains/articles/repositories/articleTagsRepo');
+
+    const result = await mod.deleteArticleTag(pool as never, 'tag-1');
+
+    expect(result).toEqual({ removed: true, affectedArticleCount: 12 });
+    expect(client.query).toHaveBeenCalledWith('begin');
+    const countCall = client.query.mock.calls.find(([sql]) =>
+      String(sql).toLowerCase().includes('count(*)::int as count'),
+    );
+    expect(countCall?.[1]).toEqual(['tag-1']);
+    const deleteCall = client.query.mock.calls.find(([sql]) =>
+      String(sql).toLowerCase().includes('delete from article_tags'),
+    );
+    expect(deleteCall?.[1]).toEqual(['tag-1']);
+    expect(client.query).toHaveBeenCalledWith('commit');
+    expect(client.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns not removed when deleting a missing tag', async () => {
+    const client = {
+      query: vi
+        .fn()
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [{ count: 0 }] })
+        .mockResolvedValueOnce({ rowCount: 0 })
+        .mockResolvedValueOnce({ rows: [] }),
+      release: vi.fn(),
+    };
+    const pool = { connect: vi.fn().mockResolvedValue(client) };
+    const mod = await import('@/server/domains/articles/repositories/articleTagsRepo');
+
+    await expect(mod.deleteArticleTag(pool as never, 'tag-1')).resolves.toEqual({
+      removed: false,
+      affectedArticleCount: 0,
+    });
+    expect(client.query).toHaveBeenCalledWith('commit');
+    expect(client.release).toHaveBeenCalledTimes(1);
+  });
 });
