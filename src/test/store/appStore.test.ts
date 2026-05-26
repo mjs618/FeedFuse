@@ -452,6 +452,341 @@ describe('appStore api integration', () => {
     expect(useAppStore.getState().tags[0]?.articleCount).toBe(1);
   });
 
+  it('updates a reader tag across visible articles, detail cache, and snapshot cache', async () => {
+    let patchBody: Record<string, unknown> | null = null;
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/tags/tag-1') && method === 'PATCH') {
+        patchBody = await getFetchCallJsonBody(input, init);
+        return jsonResponse({
+          ok: true,
+          data: {
+            tag: { id: 'tag-1', name: 'AI Research', slug: 'ai-research', color: 'blue' },
+          },
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    useAppStore.setState({
+      articles: [
+        {
+          ...createSnapshotArticle('3001', 'feed-1', 'Tagged Article'),
+          tags: [{ id: 'tag-1', name: 'AI', slug: 'ai', color: null }],
+        },
+      ],
+      articleDetailCache: {
+        '3001': {
+          ...createSnapshotArticle('3001', 'feed-1', 'Tagged Article'),
+          content: '<p>content</p>',
+          tags: [{ id: 'tag-1', name: 'AI', slug: 'ai', color: null }],
+        },
+      },
+      articleSnapshotCache: {
+        all: [
+          {
+            ...createSnapshotArticle('3001', 'feed-1', 'Tagged Article'),
+            tags: [{ id: 'tag-1', name: 'AI', slug: 'ai', color: null }],
+          },
+        ],
+        'tag:tag-1': [
+          {
+            ...createSnapshotArticle('3002', 'feed-1', 'Cached Tagged Article'),
+            tags: [{ id: 'tag-1', name: 'AI', slug: 'ai', color: null }],
+          },
+        ],
+      },
+      tags: [{ id: 'tag-1', name: 'AI', slug: 'ai', color: null, articleCount: 7 }],
+    });
+
+    useAppStore
+      .getState()
+      .updateReaderTag('tag-1', { name: 'AI Research', color: 'blue' });
+    await flushPromises();
+
+    const tag = { id: 'tag-1', name: 'AI Research', slug: 'ai-research', color: 'blue' };
+    expect(useAppStore.getState().tags).toEqual([{ ...tag, articleCount: 7 }]);
+    expect(useAppStore.getState().articles[0]?.tags).toEqual([tag]);
+    expect(useAppStore.getState().articleDetailCache['3001']?.tags).toEqual([tag]);
+    expect(useAppStore.getState().articleSnapshotCache.all?.[0]?.tags).toEqual([tag]);
+    expect(useAppStore.getState().articleSnapshotCache['tag:tag-1']?.[0]?.tags).toEqual([
+      tag,
+    ]);
+
+    const patchCall = fetchMock.mock.calls.find(
+      ([input, init]) =>
+        getFetchCallUrl(input).includes('/api/tags/tag-1') &&
+        getFetchCallMethod(input, init) === 'PATCH',
+    );
+    expect(patchCall).toBeTruthy();
+    expect(patchBody).toEqual({ name: 'AI Research', color: 'blue' });
+    expect(runImmediateSuccessMock).toHaveBeenCalledWith({
+      actionKey: 'tag.update',
+      context: { name: 'AI Research' },
+    });
+  });
+
+  it('deletes a reader tag across visible articles, detail cache, and snapshot cache', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/tags/tag-1') && method === 'DELETE') {
+        return jsonResponse({
+          ok: true,
+          data: { removed: true, affectedArticleCount: 2 },
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    const tag = { id: 'tag-1', name: 'AI', slug: 'ai', color: null };
+    useAppStore.setState({
+      selectedView: 'all',
+      selectedArticleId: '3001',
+      articles: [
+        {
+          ...createSnapshotArticle('3001', 'feed-1', 'Tagged Article'),
+          tags: [tag, { id: 'tag-2', name: 'ML', slug: 'ml', color: 'green' }],
+        },
+      ],
+      articleDetailCache: {
+        '3001': {
+          ...createSnapshotArticle('3001', 'feed-1', 'Tagged Article'),
+          content: '<p>content</p>',
+          tags: [tag],
+        },
+      },
+      articleSnapshotCache: {
+        all: [
+          {
+            ...createSnapshotArticle('3001', 'feed-1', 'Tagged Article'),
+            tags: [tag, { id: 'tag-2', name: 'ML', slug: 'ml', color: 'green' }],
+          },
+        ],
+        'tag:tag-1': [
+          {
+            ...createSnapshotArticle('3002', 'feed-1', 'Cached Tagged Article'),
+            tags: [tag],
+          },
+        ],
+      },
+      tags: [{ ...tag, articleCount: 2 }],
+    });
+
+    useAppStore.getState().deleteReaderTag(tag);
+    await flushPromises();
+
+    expect(useAppStore.getState().tags).toEqual([]);
+    expect(useAppStore.getState().articles[0]?.tags).toEqual([
+      { id: 'tag-2', name: 'ML', slug: 'ml', color: 'green' },
+    ]);
+    expect(useAppStore.getState().articleDetailCache['3001']?.tags).toEqual([]);
+    expect(useAppStore.getState().articleSnapshotCache.all?.[0]?.tags).toEqual([
+      { id: 'tag-2', name: 'ML', slug: 'ml', color: 'green' },
+    ]);
+    expect(useAppStore.getState().articleSnapshotCache['tag:tag-1']?.[0]?.tags).toEqual([]);
+    expect(useAppStore.getState().selectedView).toBe('all');
+    expect(useAppStore.getState().selectedArticleId).toBe('3001');
+    expect(
+      fetchMock.mock.calls.some(
+        ([input, init]) =>
+          getFetchCallUrl(input).includes('/api/tags/tag-1') &&
+          getFetchCallMethod(input, init) === 'DELETE',
+      ),
+    ).toBe(true);
+    expect(runImmediateSuccessMock).toHaveBeenCalledWith({
+      actionKey: 'tag.delete',
+      context: { name: 'AI' },
+    });
+  });
+
+  it('restores cached all-view articles when deleting the selected tag view', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/tags/tag-1') && method === 'DELETE') {
+        return jsonResponse({
+          ok: true,
+          data: { removed: true, affectedArticleCount: 1 },
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    const tag = { id: 'tag-1', name: 'AI', slug: 'ai', color: null };
+    const allArticle = {
+      ...createSnapshotArticle('3009', 'feed-1', 'All View Article'),
+      tags: [],
+    };
+    useAppStore.setState({
+      selectedView: 'tag:tag-1',
+      selectedArticleId: '3001',
+      articles: [
+        {
+          ...createSnapshotArticle('3001', 'feed-1', 'Tagged Article'),
+          tags: [tag],
+        },
+      ],
+      articleSnapshotCache: {
+        all: [allArticle],
+      },
+      articleListNextCursor: 'tag-cursor',
+      articleListHasMore: true,
+      articleListTotalCount: 12,
+      articleListInitialLoading: true,
+      articleListLoadingMore: true,
+      articleListLoadMoreError: true,
+      tags: [{ ...tag, articleCount: 1 }],
+    });
+
+    useAppStore.getState().deleteReaderTag(tag);
+    await flushPromises();
+
+    expect(useAppStore.getState().selectedView).toBe('all');
+    expect(useAppStore.getState().selectedArticleId).toBeNull();
+    expect(useAppStore.getState().articles).toEqual([allArticle]);
+    expect(useAppStore.getState().articleSnapshotCache['tag:tag-1']?.[0]?.tags).toEqual([]);
+    expect(useAppStore.getState().articleListNextCursor).toBeNull();
+    expect(useAppStore.getState().articleListHasMore).toBe(false);
+    expect(useAppStore.getState().articleListTotalCount).toBe(0);
+    expect(useAppStore.getState().articleListInitialLoading).toBe(false);
+    expect(useAppStore.getState().articleListLoadingMore).toBe(false);
+    expect(useAppStore.getState().articleListLoadMoreError).toBe(false);
+  });
+
+  it('clears selected tag-view articles before reloading all after deleting the selected tag without all cache', async () => {
+    const snapshotDeferred = createDeferred<Response>();
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/tags/tag-1') && method === 'DELETE') {
+        return jsonResponse({
+          ok: true,
+          data: { removed: true, affectedArticleCount: 1 },
+        });
+      }
+
+      if (url.includes('/api/reader/snapshot') && method === 'GET') {
+        return snapshotDeferred.promise;
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    const tag = { id: 'tag-1', name: 'AI', slug: 'ai', color: null };
+    const oldTaggedArticle = {
+      ...createSnapshotArticle('3001', 'feed-1', 'Old Tagged Article'),
+      tags: [tag],
+    };
+    const allArticle = createSnapshotArticle('3009', 'feed-1', 'All View Article');
+    useAppStore.setState({
+      selectedView: 'tag:tag-1',
+      selectedArticleId: '3001',
+      articles: [oldTaggedArticle],
+      articleSnapshotCache: {},
+      articleListNextCursor: 'tag-cursor',
+      articleListHasMore: true,
+      articleListTotalCount: 12,
+      articleListInitialLoading: true,
+      articleListLoadingMore: true,
+      articleListLoadMoreError: true,
+      tags: [{ ...tag, articleCount: 1 }],
+    });
+
+    useAppStore.getState().deleteReaderTag(tag);
+    await flushPromises();
+
+    expect(useAppStore.getState().selectedView).toBe('all');
+    expect(useAppStore.getState().selectedArticleId).toBeNull();
+    expect(useAppStore.getState().articles).toEqual([]);
+    expect(useAppStore.getState().articles).not.toContainEqual(oldTaggedArticle);
+    expect(useAppStore.getState().articleListNextCursor).toBeNull();
+    expect(useAppStore.getState().articleListHasMore).toBe(false);
+    expect(useAppStore.getState().articleListTotalCount).toBe(0);
+
+    snapshotDeferred.resolve(
+      jsonResponse({
+        ok: true,
+        data: createSnapshotPage({
+          items: [allArticle],
+          totalCount: 1,
+        }),
+      }),
+    );
+    await flushPromises();
+
+    expect(useAppStore.getState().selectedView).toBe('all');
+    expect(useAppStore.getState().selectedArticleId).toBeNull();
+    expect(useAppStore.getState().articles.map((article) => article.id)).toEqual(['3009']);
+    expect(useAppStore.getState().articles[0]?.title).toBe('All View Article');
+    expect(useAppStore.getState().articleListTotalCount).toBe(1);
+  });
+
+  it('reloads the current snapshot after reader tag update failure', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/tags/tag-1') && method === 'PATCH') {
+        return jsonResponse(
+          {
+            ok: false,
+            error: { code: 'internal_error', message: 'update failed' },
+          },
+          { status: 500 },
+        );
+      }
+
+      if (url.includes('/api/reader/snapshot') && method === 'GET') {
+        return jsonResponse({
+          ok: true,
+          data: createSnapshotPage({
+            items: [createSnapshotArticle('3001', 'feed-1', 'Restored Article')],
+          }),
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    useAppStore.setState({
+      selectedView: 'all',
+      articles: [
+        {
+          ...createSnapshotArticle('3001', 'feed-1', 'Tagged Article'),
+          tags: [{ id: 'tag-1', name: 'AI', slug: 'ai', color: null }],
+        },
+      ],
+    });
+
+    useAppStore.getState().updateReaderTag('tag-1', { name: 'AI Research' });
+    await flushPromises();
+
+    expect(runImmediateFailureMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionKey: 'tag.update',
+        context: { name: 'AI Research' },
+        err: expect.any(Error),
+      }),
+    );
+    expect(
+      fetchMock.mock.calls.some(
+        ([input, init]) =>
+          getFetchCallUrl(input).includes('/api/reader/snapshot') &&
+          getFetchCallMethod(input, init) === 'GET',
+      ),
+    ).toBe(true);
+  });
+
   it('bulk patches visible articles optimistically, persists de-duplicated ids, and emits success context', async () => {
     let bulkBody: Record<string, unknown> | null = null;
 

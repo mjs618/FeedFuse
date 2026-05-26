@@ -8,6 +8,7 @@ import {
   createAiDigest,
   createFeed,
   deleteFeed,
+  deleteTag as deleteTagRequest,
   getArticle,
   getAiDigestConfig as getAiDigestConfigRequest,
   getReaderSnapshot,
@@ -20,9 +21,11 @@ import {
   patchArticle,
   refreshFeed,
   removeArticleTag as removeArticleTagRequest,
+  updateTag as updateTagRequest,
   type ArticleTagDto,
   type ArticlePatchInput,
   type ReaderTagDto,
+  type UpdateTagInput,
 } from '@/lib/api/apiClient';
 import {
   runImmediateFailure,
@@ -145,6 +148,8 @@ interface AppState {
   bulkPatchArticles: (articleIds: string[], patch: ArticlePatchInput) => void;
   addArticleTag: (articleId: string, name: string) => void;
   removeArticleTag: (articleId: string, tag: ArticleTagDto) => void;
+  updateReaderTag: (tagId: string, patch: UpdateTagInput) => void;
+  deleteReaderTag: (tag: ArticleTagDto) => void;
   archiveArticle: (articleId: string) => void;
   unarchiveArticle: (articleId: string) => void;
   addFeed: (feed: {
@@ -364,6 +369,56 @@ function removeTagFromArticle(article: Article, tagId: string): Article {
     ...article,
     tags: (article.tags ?? []).filter((tag) => tag.id !== tagId),
   };
+}
+
+function replaceArticleTag(article: Article, tag: ArticleTagDto): Article {
+  if (!articleHasTag(article, tag.id)) return article;
+  return {
+    ...article,
+    tags: (article.tags ?? []).map((item) => (item.id === tag.id ? tag : item)),
+  };
+}
+
+function replaceTagInCache(
+  cache: Record<string, Article>,
+  tag: ArticleTagDto,
+): Record<string, Article> {
+  return Object.fromEntries(
+    Object.entries(cache).map(([id, article]) => [id, replaceArticleTag(article, tag)]),
+  );
+}
+
+function removeTagFromCache(
+  cache: Record<string, Article>,
+  tagId: string,
+): Record<string, Article> {
+  return Object.fromEntries(
+    Object.entries(cache).map(([id, article]) => [id, removeTagFromArticle(article, tagId)]),
+  );
+}
+
+function replaceTagInSnapshotCache(
+  cache: Record<string, Article[]>,
+  tag: ArticleTagDto,
+): Record<string, Article[]> {
+  return Object.fromEntries(
+    Object.entries(cache).map(([view, articles]) => [
+      view,
+      articles.map((article) => replaceArticleTag(article, tag)),
+    ]),
+  );
+}
+
+function removeTagFromSnapshotCache(
+  cache: Record<string, Article[]>,
+  tagId: string,
+): Record<string, Article[]> {
+  return Object.fromEntries(
+    Object.entries(cache).map(([view, articles]) => [
+      view,
+      articles.map((article) => removeTagFromArticle(article, tagId)),
+    ]),
+  );
 }
 
 function incrementReaderTag(tags: ReaderTagDto[], tag: ArticleTagDto): ReaderTagDto[] {
@@ -1433,6 +1488,78 @@ export const useAppStore = create<AppState>((set, get) => ({
           context: { name: tag.name },
           err,
         });
+      });
+  },
+
+  updateReaderTag: (tagId, patch) => {
+    void updateTagRequest(tagId, patch, { notifyOnError: false })
+      .then((tag) => {
+        set((state) => ({
+          tags: state.tags.map((item) =>
+            item.id === tag.id ? { ...tag, articleCount: item.articleCount } : item,
+          ),
+          articles: state.articles.map((article) => replaceArticleTag(article, tag)),
+          articleDetailCache: replaceTagInCache(state.articleDetailCache, tag),
+          articleSnapshotCache: replaceTagInSnapshotCache(state.articleSnapshotCache, tag),
+        }));
+        runImmediateSuccess({ actionKey: 'tag.update', context: { name: tag.name } });
+      })
+      .catch((err) => {
+        runImmediateFailure({
+          actionKey: 'tag.update',
+          context: { name: patch.name },
+          err,
+        });
+        void loadCurrentSnapshotSilently(get);
+      });
+  },
+
+  deleteReaderTag: (tag) => {
+    void deleteTagRequest(tag.id, { notifyOnError: false })
+      .then(() => {
+        let shouldReloadAllSnapshot = false;
+        set((state) => {
+          const isCurrentTagView = state.selectedView === `tag:${tag.id}`;
+          const snapshotCacheWithCurrentView = isCurrentTagView
+            ? {
+                ...state.articleSnapshotCache,
+                [state.selectedView]: state.articles,
+              }
+            : state.articleSnapshotCache;
+          const articleSnapshotCache = removeTagFromSnapshotCache(
+            snapshotCacheWithCurrentView,
+            tag.id,
+          );
+          shouldReloadAllSnapshot = isCurrentTagView && !articleSnapshotCache.all;
+          const articles = isCurrentTagView
+            ? (articleSnapshotCache.all ?? [])
+            : state.articles.map((article) => removeTagFromArticle(article, tag.id));
+          const defaultUnreadOnlyInAll =
+            useSettingsStore.getState().persistedSettings.general.defaultUnreadOnlyInAll;
+
+          return {
+            tags: state.tags.filter((item) => item.id !== tag.id),
+            articles,
+            articleDetailCache: removeTagFromCache(state.articleDetailCache, tag.id),
+            articleSnapshotCache,
+            selectedView: isCurrentTagView ? 'all' : state.selectedView,
+            selectedArticleId: isCurrentTagView ? null : state.selectedArticleId,
+            showUnreadOnly: isCurrentTagView ? defaultUnreadOnlyInAll : state.showUnreadOnly,
+            ...(isCurrentTagView ? INITIAL_ARTICLE_LIST_SESSION : {}),
+          };
+        });
+        runImmediateSuccess({ actionKey: 'tag.delete', context: { name: tag.name } });
+        if (shouldReloadAllSnapshot) {
+          void loadCurrentSnapshotSilently(get);
+        }
+      })
+      .catch((err) => {
+        runImmediateFailure({
+          actionKey: 'tag.delete',
+          context: { name: tag.name },
+          err,
+        });
+        void loadCurrentSnapshotSilently(get);
       });
   },
 
