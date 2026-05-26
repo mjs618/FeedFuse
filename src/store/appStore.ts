@@ -41,6 +41,28 @@ type FeedUpdateOptions = {
   syncInBackground?: boolean;
   refreshAfterSave?: boolean;
 };
+type TagMutationRollbackState = Pick<
+  AppState,
+  | 'tags'
+  | 'articles'
+  | 'articleDetailCache'
+  | 'articleSnapshotCache'
+  | 'selectedView'
+  | 'selectedArticleId'
+  | 'showUnreadOnly'
+  | 'articleListNextCursor'
+  | 'articleListHasMore'
+  | 'articleListTotalCount'
+  | 'articleListInitialLoading'
+  | 'articleListLoadingMore'
+  | 'articleListLoadMoreError'
+>;
+type PendingTagUpdateRollback = {
+  requestId: number;
+  previousReaderTag: ReaderTagDto;
+  previousArticleTag: ArticleTagDto;
+  optimisticTag: ArticleTagDto;
+};
 
 const DEFAULT_READER_SELECTION: { selectedView: ViewType; selectedArticleId: string | null } = {
   selectedView: 'all',
@@ -379,6 +401,51 @@ function replaceArticleTag(article: Article, tag: ArticleTagDto): Article {
   };
 }
 
+function articleTagsMatch(left: ArticleTagDto, right: ArticleTagDto): boolean {
+  return (
+    left.id === right.id &&
+    left.name === right.name &&
+    left.slug === right.slug &&
+    (left.color ?? null) === (right.color ?? null)
+  );
+}
+
+function readerTagMatchesArticleTag(left: ReaderTagDto, right: ArticleTagDto): boolean {
+  return (
+    left.id === right.id &&
+    left.name === right.name &&
+    left.slug === right.slug &&
+    (left.color ?? null) === (right.color ?? null)
+  );
+}
+
+function toArticleTag(tag: Pick<ArticleTagDto, 'id' | 'name' | 'slug' | 'color'>): ArticleTagDto {
+  return {
+    id: tag.id,
+    name: tag.name,
+    slug: tag.slug,
+    color: tag.color ?? null,
+  };
+}
+
+function replaceArticleTagIfMatches(
+  article: Article,
+  expected: ArticleTagDto,
+  replacement: ArticleTagDto,
+): Article {
+  const tags = article.tags ?? [];
+  if (!tags.some((item) => articleTagsMatch(item, expected))) return article;
+
+  return {
+    ...article,
+    tags: tags.map((item) => (articleTagsMatch(item, expected) ? replacement : item)),
+  };
+}
+
+function normalizeTagName(name: string): string {
+  return name.trim().replace(/\s+/g, ' ');
+}
+
 function replaceTagInCache(
   cache: Record<string, Article>,
   tag: ArticleTagDto,
@@ -409,6 +476,32 @@ function replaceTagInSnapshotCache(
   );
 }
 
+function replaceTagInCacheIfMatches(
+  cache: Record<string, Article>,
+  expected: ArticleTagDto,
+  replacement: ArticleTagDto,
+): Record<string, Article> {
+  return Object.fromEntries(
+    Object.entries(cache).map(([id, article]) => [
+      id,
+      replaceArticleTagIfMatches(article, expected, replacement),
+    ]),
+  );
+}
+
+function replaceTagInSnapshotCacheIfMatches(
+  cache: Record<string, Article[]>,
+  expected: ArticleTagDto,
+  replacement: ArticleTagDto,
+): Record<string, Article[]> {
+  return Object.fromEntries(
+    Object.entries(cache).map(([view, articles]) => [
+      view,
+      articles.map((article) => replaceArticleTagIfMatches(article, expected, replacement)),
+    ]),
+  );
+}
+
 function removeTagFromSnapshotCache(
   cache: Record<string, Article[]>,
   tagId: string,
@@ -419,6 +512,124 @@ function removeTagFromSnapshotCache(
       articles.map((article) => removeTagFromArticle(article, tagId)),
     ]),
   );
+}
+
+function restoreReaderTag(
+  currentTags: ReaderTagDto[],
+  previousTags: ReaderTagDto[],
+  tag: ReaderTagDto,
+): ReaderTagDto[] {
+  if (currentTags.some((item) => item.id === tag.id)) return currentTags;
+
+  const currentTagById = new Map(currentTags.map((item) => [item.id, item]));
+  const restoredTags: ReaderTagDto[] = [];
+  const usedTagIds = new Set<string>();
+
+  for (const previousTag of previousTags) {
+    if (previousTag.id === tag.id) {
+      restoredTags.push(tag);
+      usedTagIds.add(tag.id);
+      continue;
+    }
+
+    const currentTag = currentTagById.get(previousTag.id);
+    if (currentTag) {
+      restoredTags.push(currentTag);
+      usedTagIds.add(currentTag.id);
+    }
+  }
+
+  for (const currentTag of currentTags) {
+    if (!usedTagIds.has(currentTag.id)) {
+      restoredTags.push(currentTag);
+    }
+  }
+
+  return restoredTags;
+}
+
+function restoreDeletedTagInArticle(
+  currentArticle: Article,
+  previousArticle: Article | undefined,
+  tag: ArticleTagDto,
+): Article {
+  const previousTags = previousArticle?.tags ?? [];
+  const currentTags = currentArticle.tags ?? [];
+  if (!previousTags.some((item) => item.id === tag.id)) return currentArticle;
+  if (currentTags.some((item) => item.id === tag.id)) return currentArticle;
+
+  const currentTagById = new Map(currentTags.map((item) => [item.id, item]));
+  const previousTagIds = new Set(previousTags.map((item) => item.id));
+  const restoredTags = previousTags
+    .map((previousTag) => {
+      if (previousTag.id === tag.id) return tag;
+      return currentTagById.get(previousTag.id);
+    })
+    .filter((item): item is ArticleTagDto => Boolean(item));
+
+  for (const currentTag of currentTags) {
+    if (!previousTagIds.has(currentTag.id)) {
+      restoredTags.push(currentTag);
+    }
+  }
+
+  return {
+    ...currentArticle,
+    tags: restoredTags,
+  };
+}
+
+function restoreDeletedTagInArticles(
+  currentArticles: Article[],
+  previousArticles: Article[],
+  tag: ArticleTagDto,
+): Article[] {
+  const previousArticleById = new Map(previousArticles.map((article) => [article.id, article]));
+
+  return currentArticles.map((article) =>
+    restoreDeletedTagInArticle(article, previousArticleById.get(article.id), tag),
+  );
+}
+
+function restoreDeletedTagInCache(
+  currentCache: Record<string, Article>,
+  previousCache: Record<string, Article>,
+  tag: ArticleTagDto,
+): Record<string, Article> {
+  return Object.fromEntries(
+    Object.entries(currentCache).map(([articleId, article]) => [
+      articleId,
+      restoreDeletedTagInArticle(article, previousCache[articleId], tag),
+    ]),
+  );
+}
+
+function restoreDeletedTagInSnapshotCache(
+  currentCache: Record<string, Article[]>,
+  previousCache: Record<string, Article[]>,
+  tag: ArticleTagDto,
+): Record<string, Article[]> {
+  return Object.fromEntries(
+    Object.entries(currentCache).map(([view, articles]) => [
+      view,
+      restoreDeletedTagInArticles(articles, previousCache[view] ?? [], tag),
+    ]),
+  );
+}
+
+function removeConfirmedDeletedTagsFromArticle(article: Article): Article {
+  if (confirmedDeletedTagIds.size === 0) return article;
+
+  return {
+    ...article,
+    tags: (article.tags ?? []).filter((tag) => !confirmedDeletedTagIds.has(tag.id)),
+  };
+}
+
+function removeConfirmedDeletedTagsFromReaderTags(tags: ReaderTagDto[]): ReaderTagDto[] {
+  if (confirmedDeletedTagIds.size === 0) return tags;
+
+  return tags.filter((tag) => !confirmedDeletedTagIds.has(tag.id));
 }
 
 function incrementReaderTag(tags: ReaderTagDto[], tag: ArticleTagDto): ReaderTagDto[] {
@@ -720,6 +931,14 @@ function mergeArticleIntoCollections(
 
 let snapshotRequestId = 0;
 const latestSnapshotRequestIdByView = new Map<string, number>();
+let tagMutationRequestId = 0;
+const latestTagUpdateRequestIdByTag = new Map<string, number>();
+const latestTagDeleteRequestIdByTag = new Map<string, number>();
+const latestConfirmedTagUpdateRequestIdByTag = new Map<string, number>();
+const pendingTagUpdateRollbackByTag = new Map<string, PendingTagUpdateRollback>();
+const pendingTagUpdateSuccessByTag = new Map<string, ArticleTagDto>();
+const confirmedDeletedTagIds = new Set<string>();
+let readerSelectionChangeId = 0;
 const ADD_FEED_SNAPSHOT_POLL_MAX_ATTEMPTS = 20;
 const ADD_FEED_SNAPSHOT_POLL_INTERVAL_MS = 750;
 // Tracks how the next selected view/article URL sync should write browser history.
@@ -732,6 +951,58 @@ const INITIAL_ARTICLE_LIST_SESSION = {
   articleListLoadingMore: false,
   articleListLoadMoreError: false,
 };
+
+function getTagMutationRollbackState(state: AppState): TagMutationRollbackState {
+  return {
+    tags: state.tags,
+    articles: state.articles,
+    articleDetailCache: state.articleDetailCache,
+    articleSnapshotCache: state.articleSnapshotCache,
+    selectedView: state.selectedView,
+    selectedArticleId: state.selectedArticleId,
+    showUnreadOnly: state.showUnreadOnly,
+    articleListNextCursor: state.articleListNextCursor,
+    articleListHasMore: state.articleListHasMore,
+    articleListTotalCount: state.articleListTotalCount,
+    articleListInitialLoading: state.articleListInitialLoading,
+    articleListLoadingMore: state.articleListLoadingMore,
+    articleListLoadMoreError: state.articleListLoadMoreError,
+  };
+}
+
+function rollbackPendingTagUpdateState(
+  state: TagMutationRollbackState,
+  pendingUpdate: PendingTagUpdateRollback | undefined,
+): TagMutationRollbackState {
+  if (!pendingUpdate) return state;
+
+  return {
+    ...state,
+    tags: state.tags.map((item) =>
+      item.id === pendingUpdate.previousReaderTag.id &&
+      readerTagMatchesArticleTag(item, pendingUpdate.optimisticTag)
+        ? pendingUpdate.previousReaderTag
+        : item,
+    ),
+    articles: state.articles.map((article) =>
+      replaceArticleTagIfMatches(
+        article,
+        pendingUpdate.optimisticTag,
+        pendingUpdate.previousArticleTag,
+      ),
+    ),
+    articleDetailCache: replaceTagInCacheIfMatches(
+      state.articleDetailCache,
+      pendingUpdate.optimisticTag,
+      pendingUpdate.previousArticleTag,
+    ),
+    articleSnapshotCache: replaceTagInSnapshotCacheIfMatches(
+      state.articleSnapshotCache,
+      pendingUpdate.optimisticTag,
+      pendingUpdate.previousArticleTag,
+    ),
+  };
+}
 
 function queueReaderSelectionHistoryMode(mode: ReaderSelectionHistoryMode): void {
   pendingReaderSelectionHistoryMode = mode;
@@ -921,6 +1192,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   ...INITIAL_ARTICLE_LIST_SESSION,
 
   setSelectedView: (view, options) => {
+    readerSelectionChangeId += 1;
     queueReaderSelectionHistoryMode(options?.history ?? 'replace');
     set(() => {
       const defaultUnreadOnlyInAll = useSettingsStore.getState().persistedSettings.general.defaultUnreadOnlyInAll;
@@ -942,6 +1214,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
   },
   setSelectedArticle: (id, options) => {
+    readerSelectionChangeId += 1;
     queueReaderSelectionHistoryMode(options?.history ?? (id ? 'push' : 'replace'));
     set((state) => {
       const currentArticle = getArticleFromCollections(
@@ -1078,10 +1351,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         );
         const articles = preserveSelectedArticleInVisibleSnapshot(
           snapshot.articles.items.map((item) =>
-            mergeSnapshotArticleWithExistingDetails(
-              mapSnapshotArticleItem(item),
-              existingArticleById.get(item.id),
-              articleDetailCache[item.id],
+            removeConfirmedDeletedTagsFromArticle(
+              mergeSnapshotArticleWithExistingDetails(
+                mapSnapshotArticleItem(item),
+                existingArticleById.get(item.id),
+                articleDetailCache[item.id],
+              ),
             ),
           ),
           isVisibleView ? preservedSelectedArticle : undefined,
@@ -1096,7 +1371,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         return {
           categories,
           feeds,
-          tags: snapshot.tags ?? state.tags,
+          tags: removeConfirmedDeletedTagsFromReaderTags(snapshot.tags ?? state.tags),
           articles: isVisibleView ? articles : state.articles,
           articleDetailCache,
           articleSnapshotCache,
@@ -1163,7 +1438,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (currentState.selectedView !== view) return {};
 
         const incomingArticles = snapshot.articles.items.map((item) =>
-          mapSnapshotArticleItem(item),
+          removeConfirmedDeletedTagsFromArticle(mapSnapshotArticleItem(item)),
         );
         const articles = mergeSnapshotPage(
           currentState.articles,
@@ -1174,7 +1449,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
         return {
           articles,
-          tags: snapshot.tags ?? currentState.tags,
+          tags: removeConfirmedDeletedTagsFromReaderTags(snapshot.tags ?? currentState.tags),
           articleSnapshotCache: {
             ...currentState.articleSnapshotCache,
             [view]: articles,
@@ -1492,22 +1767,141 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   updateReaderTag: (tagId, patch) => {
-    void updateTagRequest(tagId, patch, { notifyOnError: false })
+    const normalizedPatch: UpdateTagInput = {
+      ...patch,
+      ...(typeof patch.name === 'string' ? { name: normalizeTagName(patch.name) } : {}),
+    };
+    const stateBefore = get();
+    const previousReaderTag = stateBefore.tags.find((item) => item.id === tagId);
+    if (!previousReaderTag) return;
+
+    const previousArticleTag = toArticleTag(previousReaderTag);
+    const optimisticTag: ArticleTagDto = {
+      id: previousReaderTag.id,
+      name: normalizedPatch.name ?? previousReaderTag.name,
+      slug: previousReaderTag.slug,
+      color: Object.prototype.hasOwnProperty.call(normalizedPatch, 'color')
+        ? (normalizedPatch.color ?? null)
+        : previousReaderTag.color,
+    };
+    const requestId = (tagMutationRequestId += 1);
+    latestTagUpdateRequestIdByTag.set(tagId, requestId);
+    const pendingUpdateRollback = pendingTagUpdateRollbackByTag.get(tagId);
+    pendingTagUpdateRollbackByTag.set(tagId, {
+      requestId,
+      previousReaderTag: pendingUpdateRollback?.previousReaderTag ?? previousReaderTag,
+      previousArticleTag: pendingUpdateRollback?.previousArticleTag ?? previousArticleTag,
+      optimisticTag,
+    });
+
+    set((state) => {
+      return {
+        tags: state.tags.map((item) =>
+          item.id === optimisticTag.id
+            ? { ...optimisticTag, articleCount: item.articleCount }
+            : item,
+        ),
+        articles: state.articles.map((article) => replaceArticleTag(article, optimisticTag)),
+        articleDetailCache: replaceTagInCache(state.articleDetailCache, optimisticTag),
+        articleSnapshotCache: replaceTagInSnapshotCache(state.articleSnapshotCache, optimisticTag),
+      };
+    });
+
+    void updateTagRequest(tagId, normalizedPatch, { notifyOnError: false })
       .then((tag) => {
-        set((state) => ({
-          tags: state.tags.map((item) =>
-            item.id === tag.id ? { ...tag, articleCount: item.articleCount } : item,
-          ),
-          articles: state.articles.map((article) => replaceArticleTag(article, tag)),
-          articleDetailCache: replaceTagInCache(state.articleDetailCache, tag),
-          articleSnapshotCache: replaceTagInSnapshotCache(state.articleSnapshotCache, tag),
-        }));
-        runImmediateSuccess({ actionKey: 'tag.update', context: { name: tag.name } });
+        if (latestTagUpdateRequestIdByTag.get(tagId) !== requestId) {
+          const confirmedRequestId = latestConfirmedTagUpdateRequestIdByTag.get(tagId) ?? 0;
+          if (requestId <= confirmedRequestId) return;
+
+          latestConfirmedTagUpdateRequestIdByTag.set(tagId, requestId);
+          if (
+            latestTagDeleteRequestIdByTag.has(tagId) ||
+            pendingTagUpdateRollbackByTag.has(tagId)
+          ) {
+            pendingTagUpdateSuccessByTag.set(tagId, tag);
+          } else {
+            set((state) => ({
+              tags: state.tags.map((item) =>
+                item.id === tag.id ? { ...tag, articleCount: item.articleCount } : item,
+              ),
+              articles: state.articles.map((article) => replaceArticleTag(article, tag)),
+              articleDetailCache: replaceTagInCache(state.articleDetailCache, tag),
+              articleSnapshotCache: replaceTagInSnapshotCache(state.articleSnapshotCache, tag),
+            }));
+          }
+
+          if (pendingTagUpdateRollbackByTag.get(tagId)?.requestId === requestId) {
+            pendingTagUpdateRollbackByTag.delete(tagId);
+          }
+          return;
+        }
+
+        latestConfirmedTagUpdateRequestIdByTag.set(tagId, requestId);
+        if (latestTagDeleteRequestIdByTag.has(tagId)) {
+          pendingTagUpdateSuccessByTag.set(tagId, tag);
+        } else {
+          set((state) => ({
+            tags: state.tags.map((item) =>
+              item.id === tag.id ? { ...tag, articleCount: item.articleCount } : item,
+            ),
+            articles: state.articles.map((article) => replaceArticleTag(article, tag)),
+            articleDetailCache: replaceTagInCache(state.articleDetailCache, tag),
+            articleSnapshotCache: replaceTagInSnapshotCache(state.articleSnapshotCache, tag),
+          }));
+          runImmediateSuccess({ actionKey: 'tag.update', context: { name: tag.name } });
+          pendingTagUpdateSuccessByTag.delete(tagId);
+        }
+        pendingTagUpdateRollbackByTag.delete(tagId);
       })
       .catch((err) => {
+        if (latestTagUpdateRequestIdByTag.get(tagId) !== requestId) {
+          if (pendingTagUpdateRollbackByTag.get(tagId)?.requestId === requestId) {
+            pendingTagUpdateRollbackByTag.delete(tagId);
+          }
+          return;
+        }
+        const rollback = pendingTagUpdateRollbackByTag.get(tagId);
+        if (!rollback) return;
+        const updateSuccessTag = pendingTagUpdateSuccessByTag.get(tagId);
+        const rollbackReaderTag = updateSuccessTag
+          ? { ...updateSuccessTag, articleCount: rollback.previousReaderTag.articleCount }
+          : rollback.previousReaderTag;
+        const rollbackArticleTag = updateSuccessTag
+          ? toArticleTag(updateSuccessTag)
+          : rollback.previousArticleTag;
+
+        set((state) => ({
+          tags: state.tags.map((item) =>
+            item.id === tagId && readerTagMatchesArticleTag(item, rollback.optimisticTag)
+              ? rollbackReaderTag
+              : item,
+          ),
+          articles: state.articles.map((article) =>
+            replaceArticleTagIfMatches(
+              article,
+              rollback.optimisticTag,
+              rollbackArticleTag,
+            ),
+          ),
+          articleDetailCache: replaceTagInCacheIfMatches(
+            state.articleDetailCache,
+            rollback.optimisticTag,
+            rollbackArticleTag,
+          ),
+          articleSnapshotCache: replaceTagInSnapshotCacheIfMatches(
+            state.articleSnapshotCache,
+            rollback.optimisticTag,
+            rollbackArticleTag,
+          ),
+        }));
+        pendingTagUpdateRollbackByTag.delete(tagId);
+        if (!latestTagDeleteRequestIdByTag.has(tagId)) {
+          pendingTagUpdateSuccessByTag.delete(tagId);
+        }
+
         runImmediateFailure({
           actionKey: 'tag.update',
-          context: { name: patch.name },
+          context: { name: normalizedPatch.name },
           err,
         });
         void loadCurrentSnapshotSilently(get);
@@ -1515,45 +1909,145 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   deleteReaderTag: (tag) => {
-    void deleteTagRequest(tag.id, { notifyOnError: false })
-      .then(() => {
-        let shouldReloadAllSnapshot = false;
-        set((state) => {
-          const isCurrentTagView = state.selectedView === `tag:${tag.id}`;
-          const snapshotCacheWithCurrentView = isCurrentTagView
-            ? {
-                ...state.articleSnapshotCache,
-                [state.selectedView]: state.articles,
-              }
-            : state.articleSnapshotCache;
-          const articleSnapshotCache = removeTagFromSnapshotCache(
-            snapshotCacheWithCurrentView,
-            tag.id,
-          );
-          shouldReloadAllSnapshot = isCurrentTagView && !articleSnapshotCache.all;
-          const articles = isCurrentTagView
-            ? (articleSnapshotCache.all ?? [])
-            : state.articles.map((article) => removeTagFromArticle(article, tag.id));
-          const defaultUnreadOnlyInAll =
-            useSettingsStore.getState().persistedSettings.general.defaultUnreadOnlyInAll;
+    const deleteRequest = deleteTagRequest(tag.id, { notifyOnError: false });
+    const rollbackState = rollbackPendingTagUpdateState(
+      getTagMutationRollbackState(get()),
+      pendingTagUpdateRollbackByTag.get(tag.id),
+    );
+    const rollbackTag =
+      rollbackState.tags.find((item) => item.id === tag.id) ??
+      ({ ...tag, articleCount: 0 } satisfies ReaderTagDto);
+    const isDeletingCurrentTagView = rollbackState.selectedView === `tag:${tag.id}`;
+    const fallbackShowUnreadOnly =
+      useSettingsStore.getState().persistedSettings.general.defaultUnreadOnlyInAll;
+    const selectionChangeIdBeforeDelete = readerSelectionChangeId;
+    const requestId = (tagMutationRequestId += 1);
+    latestTagDeleteRequestIdByTag.set(tag.id, requestId);
+    let shouldReloadAllSnapshot = false;
+    set((state) => {
+      const isCurrentTagView = state.selectedView === `tag:${tag.id}`;
+      const snapshotCacheWithCurrentView = isCurrentTagView
+        ? {
+            ...state.articleSnapshotCache,
+            [state.selectedView]: state.articles,
+          }
+        : state.articleSnapshotCache;
+      const articleSnapshotCache = removeTagFromSnapshotCache(
+        snapshotCacheWithCurrentView,
+        tag.id,
+      );
+      shouldReloadAllSnapshot = isCurrentTagView && !articleSnapshotCache.all;
+      const articles = isCurrentTagView
+        ? (articleSnapshotCache.all ?? [])
+        : state.articles.map((article) => removeTagFromArticle(article, tag.id));
+      const defaultUnreadOnlyInAll =
+        useSettingsStore.getState().persistedSettings.general.defaultUnreadOnlyInAll;
 
-          return {
-            tags: state.tags.filter((item) => item.id !== tag.id),
-            articles,
-            articleDetailCache: removeTagFromCache(state.articleDetailCache, tag.id),
-            articleSnapshotCache,
-            selectedView: isCurrentTagView ? 'all' : state.selectedView,
-            selectedArticleId: isCurrentTagView ? null : state.selectedArticleId,
-            showUnreadOnly: isCurrentTagView ? defaultUnreadOnlyInAll : state.showUnreadOnly,
-            ...(isCurrentTagView ? INITIAL_ARTICLE_LIST_SESSION : {}),
-          };
-        });
+      return {
+        tags: state.tags.filter((item) => item.id !== tag.id),
+        articles,
+        articleDetailCache: removeTagFromCache(state.articleDetailCache, tag.id),
+        articleSnapshotCache,
+        selectedView: isCurrentTagView ? 'all' : state.selectedView,
+        selectedArticleId: isCurrentTagView ? null : state.selectedArticleId,
+        showUnreadOnly: isCurrentTagView ? defaultUnreadOnlyInAll : state.showUnreadOnly,
+        ...(isCurrentTagView ? INITIAL_ARTICLE_LIST_SESSION : {}),
+      };
+    });
+    if (shouldReloadAllSnapshot) {
+      void loadCurrentSnapshotSilently(get);
+    }
+
+    void deleteRequest
+      .then(() => {
+        if (latestTagDeleteRequestIdByTag.get(tag.id) !== requestId) return;
+
+        confirmedDeletedTagIds.add(tag.id);
+        set((state) => ({
+          tags: state.tags.filter((item) => item.id !== tag.id),
+          articles: state.articles.map((article) => removeTagFromArticle(article, tag.id)),
+          articleDetailCache: removeTagFromCache(state.articleDetailCache, tag.id),
+          articleSnapshotCache: removeTagFromSnapshotCache(state.articleSnapshotCache, tag.id),
+        }));
+        latestTagDeleteRequestIdByTag.delete(tag.id);
+        latestConfirmedTagUpdateRequestIdByTag.delete(tag.id);
+        pendingTagUpdateRollbackByTag.delete(tag.id);
+        pendingTagUpdateSuccessByTag.delete(tag.id);
         runImmediateSuccess({ actionKey: 'tag.delete', context: { name: tag.name } });
-        if (shouldReloadAllSnapshot) {
-          void loadCurrentSnapshotSilently(get);
-        }
       })
       .catch((err) => {
+        if (latestTagDeleteRequestIdByTag.get(tag.id) !== requestId) return;
+        confirmedDeletedTagIds.delete(tag.id);
+
+        set((state) => {
+          const updateSuccessTag = pendingTagUpdateSuccessByTag.get(tag.id);
+          const restoredTag = updateSuccessTag
+            ? { ...updateSuccessTag, articleCount: rollbackTag.articleCount }
+            : rollbackTag;
+          const restoredArticleTag = toArticleTag(restoredTag);
+          const hasUpdateSuccess = Boolean(updateSuccessTag);
+          const tags = restoreReaderTag(state.tags, rollbackState.tags, restoredTag).map((item) =>
+            hasUpdateSuccess && item.id === restoredTag.id ? restoredTag : item,
+          );
+          const articleDetailCache = replaceTagInCache(
+            restoreDeletedTagInCache(
+              state.articleDetailCache,
+              rollbackState.articleDetailCache,
+              restoredArticleTag,
+            ),
+            restoredArticleTag,
+          );
+          const articleSnapshotCache = replaceTagInSnapshotCache(
+            restoreDeletedTagInSnapshotCache(
+              state.articleSnapshotCache,
+              rollbackState.articleSnapshotCache,
+              restoredArticleTag,
+            ),
+            restoredArticleTag,
+          );
+          const restoredVisibleArticles = restoreDeletedTagInArticles(
+            state.articles,
+            rollbackState.articleSnapshotCache[state.selectedView] ?? rollbackState.articles,
+            restoredArticleTag,
+          ).map((article) => replaceArticleTag(article, restoredArticleTag));
+          if (isDeletingCurrentTagView) {
+            articleSnapshotCache[rollbackState.selectedView] = rollbackState.articles.map(
+              (article) => replaceArticleTag(article, restoredArticleTag),
+            );
+          }
+          const shouldRestoreSelection =
+            isDeletingCurrentTagView &&
+            readerSelectionChangeId === selectionChangeIdBeforeDelete &&
+            state.selectedView === 'all' &&
+            state.selectedArticleId === null &&
+            state.showUnreadOnly === fallbackShowUnreadOnly;
+
+          return {
+            tags,
+            articles: shouldRestoreSelection
+              ? rollbackState.articles.map((article) =>
+                  replaceArticleTag(article, restoredArticleTag),
+                )
+              : (articleSnapshotCache[state.selectedView] ?? restoredVisibleArticles),
+            articleDetailCache,
+            articleSnapshotCache,
+            ...(shouldRestoreSelection
+              ? {
+                  selectedView: rollbackState.selectedView,
+                  selectedArticleId: rollbackState.selectedArticleId,
+                  showUnreadOnly: rollbackState.showUnreadOnly,
+                  articleListNextCursor: rollbackState.articleListNextCursor,
+                  articleListHasMore: rollbackState.articleListHasMore,
+                  articleListTotalCount: rollbackState.articleListTotalCount,
+                  articleListInitialLoading: rollbackState.articleListInitialLoading,
+                  articleListLoadingMore: rollbackState.articleListLoadingMore,
+                  articleListLoadMoreError: rollbackState.articleListLoadMoreError,
+                }
+              : {}),
+          };
+        });
+        latestTagDeleteRequestIdByTag.delete(tag.id);
+        pendingTagUpdateSuccessByTag.delete(tag.id);
         runImmediateFailure({
           actionKey: 'tag.delete',
           context: { name: tag.name },

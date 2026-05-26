@@ -530,6 +530,74 @@ describe('appStore api integration', () => {
     });
   });
 
+  it('optimistically updates a reader tag before the api response resolves', async () => {
+    const patchDeferred = createDeferred<Response>();
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/tags/tag-1') && method === 'PATCH') {
+        return patchDeferred.promise;
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    useAppStore.setState({
+      articles: [
+        {
+          ...createSnapshotArticle('3001', 'feed-1', 'Tagged Article'),
+          tags: [{ id: 'tag-1', name: 'AI', slug: 'ai', color: null }],
+        },
+      ],
+      articleDetailCache: {
+        '3001': {
+          ...createSnapshotArticle('3001', 'feed-1', 'Tagged Article'),
+          content: '<p>content</p>',
+          tags: [{ id: 'tag-1', name: 'AI', slug: 'ai', color: null }],
+        },
+      },
+      articleSnapshotCache: {
+        all: [
+          {
+            ...createSnapshotArticle('3001', 'feed-1', 'Tagged Article'),
+            tags: [{ id: 'tag-1', name: 'AI', slug: 'ai', color: null }],
+          },
+        ],
+      },
+      tags: [{ id: 'tag-1', name: 'AI', slug: 'ai', color: null, articleCount: 7 }],
+    });
+
+    useAppStore
+      .getState()
+      .updateReaderTag('tag-1', { name: '  AI   Research  ', color: 'blue' });
+
+    const optimisticTag = { id: 'tag-1', name: 'AI Research', slug: 'ai', color: 'blue' };
+    expect(useAppStore.getState().tags).toEqual([{ ...optimisticTag, articleCount: 7 }]);
+    expect(useAppStore.getState().articles[0]?.tags).toEqual([optimisticTag]);
+    expect(useAppStore.getState().articleDetailCache['3001']?.tags).toEqual([optimisticTag]);
+    expect(useAppStore.getState().articleSnapshotCache.all?.[0]?.tags).toEqual([optimisticTag]);
+    expect(runImmediateSuccessMock).not.toHaveBeenCalled();
+
+    patchDeferred.resolve(
+      jsonResponse({
+        ok: true,
+        data: {
+          tag: { id: 'tag-1', name: 'AI Research', slug: 'ai-research', color: 'blue' },
+        },
+      }),
+    );
+    await flushPromises();
+
+    const serverTag = { id: 'tag-1', name: 'AI Research', slug: 'ai-research', color: 'blue' };
+    expect(useAppStore.getState().tags).toEqual([{ ...serverTag, articleCount: 7 }]);
+    expect(useAppStore.getState().articles[0]?.tags).toEqual([serverTag]);
+    expect(runImmediateSuccessMock).toHaveBeenCalledWith({
+      actionKey: 'tag.update',
+      context: { name: 'AI Research' },
+    });
+  });
+
   it('deletes a reader tag across visible articles, detail cache, and snapshot cache', async () => {
     fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = getFetchCallUrl(input);
@@ -600,6 +668,77 @@ describe('appStore api integration', () => {
           getFetchCallMethod(input, init) === 'DELETE',
       ),
     ).toBe(true);
+    expect(runImmediateSuccessMock).toHaveBeenCalledWith({
+      actionKey: 'tag.delete',
+      context: { name: 'AI' },
+    });
+  });
+
+  it('optimistically deletes a reader tag before the api response resolves', async () => {
+    const deleteDeferred = createDeferred<Response>();
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/tags/tag-1') && method === 'DELETE') {
+        return deleteDeferred.promise;
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    const tag = { id: 'tag-1', name: 'AI', slug: 'ai', color: null };
+    const allArticle = {
+      ...createSnapshotArticle('3009', 'feed-1', 'All View Article'),
+      tags: [{ id: 'tag-2', name: 'ML', slug: 'ml', color: 'green' }],
+    };
+    useAppStore.setState({
+      selectedView: 'tag:tag-1',
+      selectedArticleId: '3001',
+      articles: [
+        {
+          ...createSnapshotArticle('3001', 'feed-1', 'Tagged Article'),
+          tags: [tag],
+        },
+      ],
+      articleDetailCache: {
+        '3001': {
+          ...createSnapshotArticle('3001', 'feed-1', 'Tagged Article'),
+          content: '<p>content</p>',
+          tags: [tag],
+        },
+      },
+      articleSnapshotCache: {
+        all: [allArticle],
+      },
+      articleListNextCursor: 'tag-cursor',
+      articleListHasMore: true,
+      articleListTotalCount: 12,
+      articleListInitialLoading: true,
+      articleListLoadingMore: true,
+      articleListLoadMoreError: true,
+      tags: [{ ...tag, articleCount: 1 }],
+    });
+
+    useAppStore.getState().deleteReaderTag(tag);
+
+    expect(useAppStore.getState().tags).toEqual([]);
+    expect(useAppStore.getState().selectedView).toBe('all');
+    expect(useAppStore.getState().selectedArticleId).toBeNull();
+    expect(useAppStore.getState().articles).toEqual([allArticle]);
+    expect(useAppStore.getState().articleDetailCache['3001']?.tags).toEqual([]);
+    expect(useAppStore.getState().articleSnapshotCache['tag:tag-1']?.[0]?.tags).toEqual([]);
+    expect(runImmediateSuccessMock).not.toHaveBeenCalled();
+
+    deleteDeferred.resolve(
+      jsonResponse({
+        ok: true,
+        data: { removed: true, affectedArticleCount: 1 },
+      }),
+    );
+    await flushPromises();
+
+    expect(useAppStore.getState().tags).toEqual([]);
     expect(runImmediateSuccessMock).toHaveBeenCalledWith({
       actionKey: 'tag.delete',
       context: { name: 'AI' },
@@ -766,6 +905,7 @@ describe('appStore api integration', () => {
           tags: [{ id: 'tag-1', name: 'AI', slug: 'ai', color: null }],
         },
       ],
+      tags: [{ id: 'tag-1', name: 'AI', slug: 'ai', color: null, articleCount: 1 }],
     });
 
     useAppStore.getState().updateReaderTag('tag-1', { name: 'AI Research' });
@@ -785,6 +925,1217 @@ describe('appStore api integration', () => {
           getFetchCallMethod(input, init) === 'GET',
       ),
     ).toBe(true);
+  });
+
+  it('rolls back all optimistic reader tag update caches after failure', async () => {
+    const snapshotDeferred = createDeferred<Response>();
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/tags/tag-1') && method === 'PATCH') {
+        return jsonResponse(
+          {
+            ok: false,
+            error: { code: 'internal_error', message: 'update failed' },
+          },
+          { status: 500 },
+        );
+      }
+
+      if (url.includes('/api/reader/snapshot') && method === 'GET') {
+        return snapshotDeferred.promise;
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    const oldTag = { id: 'tag-1', name: 'AI', slug: 'ai', color: null };
+    const visibleArticle = {
+      ...createSnapshotArticle('3001', 'feed-1', 'Tagged Article'),
+      tags: [oldTag],
+    };
+    const cachedArticle = {
+      ...createSnapshotArticle('3002', 'feed-2', 'Cached Tagged Article'),
+      tags: [oldTag],
+    };
+    useAppStore.setState({
+      selectedView: 'all',
+      articles: [visibleArticle],
+      articleDetailCache: {
+        '3001': {
+          ...visibleArticle,
+          content: '<p>content</p>',
+        },
+      },
+      articleSnapshotCache: {
+        all: [visibleArticle],
+        'feed-2': [cachedArticle],
+      },
+      tags: [{ ...oldTag, articleCount: 2 }],
+    });
+
+    useAppStore.getState().updateReaderTag('tag-1', { name: 'AI Research', color: 'blue' });
+    await flushPromises();
+
+    expect(useAppStore.getState().tags).toEqual([{ ...oldTag, articleCount: 2 }]);
+    expect(useAppStore.getState().articles).toEqual([visibleArticle]);
+    expect(useAppStore.getState().articleDetailCache['3001']?.tags).toEqual([oldTag]);
+    expect(useAppStore.getState().articleSnapshotCache.all).toEqual([visibleArticle]);
+    expect(useAppStore.getState().articleSnapshotCache['feed-2']).toEqual([cachedArticle]);
+    expect(runImmediateFailureMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionKey: 'tag.update',
+        context: { name: 'AI Research' },
+        err: expect.any(Error),
+      }),
+    );
+    expect(
+      fetchMock.mock.calls.some(
+        ([input, init]) =>
+          getFetchCallUrl(input).includes('/api/reader/snapshot') &&
+          getFetchCallMethod(input, init) === 'GET',
+      ),
+    ).toBe(true);
+  });
+
+  it('rolls back all optimistic reader tag delete state after failure', async () => {
+    const snapshotDeferred = createDeferred<Response>();
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/tags/tag-1') && method === 'DELETE') {
+        return jsonResponse(
+          {
+            ok: false,
+            error: { code: 'internal_error', message: 'delete failed' },
+          },
+          { status: 500 },
+        );
+      }
+
+      if (url.includes('/api/reader/snapshot') && method === 'GET') {
+        return snapshotDeferred.promise;
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    const tag = { id: 'tag-1', name: 'AI', slug: 'ai', color: null };
+    const visibleArticle = {
+      ...createSnapshotArticle('3001', 'feed-1', 'Tagged Article'),
+      tags: [tag],
+    };
+    const allArticle = {
+      ...createSnapshotArticle('3009', 'feed-1', 'All View Article'),
+      tags: [tag],
+    };
+    useAppStore.setState({
+      selectedView: 'tag:tag-1',
+      selectedArticleId: '3001',
+      showUnreadOnly: true,
+      articles: [visibleArticle],
+      articleDetailCache: {
+        '3001': {
+          ...visibleArticle,
+          content: '<p>content</p>',
+        },
+      },
+      articleSnapshotCache: {
+        all: [allArticle],
+        'feed-1': [visibleArticle],
+      },
+      articleListNextCursor: 'tag-cursor',
+      articleListHasMore: true,
+      articleListTotalCount: 12,
+      articleListInitialLoading: true,
+      articleListLoadingMore: true,
+      articleListLoadMoreError: true,
+      tags: [{ ...tag, articleCount: 2 }],
+    });
+
+    useAppStore.getState().deleteReaderTag(tag);
+    await flushPromises();
+
+    expect(useAppStore.getState().tags).toEqual([{ ...tag, articleCount: 2 }]);
+    expect(useAppStore.getState().selectedView).toBe('tag:tag-1');
+    expect(useAppStore.getState().selectedArticleId).toBe('3001');
+    expect(useAppStore.getState().showUnreadOnly).toBe(true);
+    expect(useAppStore.getState().articles).toEqual([visibleArticle]);
+    expect(useAppStore.getState().articleDetailCache['3001']?.tags).toEqual([tag]);
+    expect(useAppStore.getState().articleSnapshotCache.all).toEqual([allArticle]);
+    expect(useAppStore.getState().articleSnapshotCache['feed-1']).toEqual([visibleArticle]);
+    expect(runImmediateFailureMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionKey: 'tag.delete',
+        context: { name: 'AI' },
+        err: expect.any(Error),
+      }),
+    );
+    expect(
+      fetchMock.mock.calls.some(
+        ([input, init]) =>
+          getFetchCallUrl(input).includes('/api/reader/snapshot') &&
+          getFetchCallMethod(input, init) === 'GET',
+      ),
+    ).toBe(true);
+  });
+
+  it('does not let an older failed reader tag update overwrite a newer success', async () => {
+    const firstPatchDeferred = createDeferred<Response>();
+    const secondPatchDeferred = createDeferred<Response>();
+    let patchCount = 0;
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/tags/tag-1') && method === 'PATCH') {
+        patchCount += 1;
+        return patchCount === 1 ? firstPatchDeferred.promise : secondPatchDeferred.promise;
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    const oldTag = { id: 'tag-1', name: 'AI', slug: 'ai', color: null };
+    useAppStore.setState({
+      articles: [
+        {
+          ...createSnapshotArticle('3001', 'feed-1', 'Tagged Article'),
+          tags: [oldTag],
+        },
+      ],
+      tags: [{ ...oldTag, articleCount: 1 }],
+    });
+
+    useAppStore.getState().updateReaderTag('tag-1', { name: 'AI Draft' });
+    useAppStore.getState().updateReaderTag('tag-1', { name: 'AI Final', color: 'green' });
+
+    secondPatchDeferred.resolve(
+      jsonResponse({
+        ok: true,
+        data: {
+          tag: { id: 'tag-1', name: 'AI Final', slug: 'ai-final', color: 'green' },
+        },
+      }),
+    );
+    await flushPromises();
+
+    firstPatchDeferred.resolve(
+      jsonResponse(
+        {
+          ok: false,
+          error: { code: 'internal_error', message: 'update failed' },
+        },
+        { status: 500 },
+      ),
+    );
+    await flushPromises();
+
+    const finalTag = { id: 'tag-1', name: 'AI Final', slug: 'ai-final', color: 'green' };
+    expect(useAppStore.getState().tags).toEqual([{ ...finalTag, articleCount: 1 }]);
+    expect(useAppStore.getState().articles[0]?.tags).toEqual([finalTag]);
+    expect(runImmediateSuccessMock).toHaveBeenCalledWith({
+      actionKey: 'tag.update',
+      context: { name: 'AI Final' },
+    });
+    expect(runImmediateFailureMock).not.toHaveBeenCalled();
+  });
+
+  it('rolls back to the original tag when consecutive reader tag updates both fail', async () => {
+    const firstPatchDeferred = createDeferred<Response>();
+    const secondPatchDeferred = createDeferred<Response>();
+    const snapshotDeferred = createDeferred<Response>();
+    let patchCount = 0;
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/tags/tag-1') && method === 'PATCH') {
+        patchCount += 1;
+        return patchCount === 1 ? firstPatchDeferred.promise : secondPatchDeferred.promise;
+      }
+
+      if (url.includes('/api/reader/snapshot') && method === 'GET') {
+        return snapshotDeferred.promise;
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    const oldTag = { id: 'tag-1', name: 'AI', slug: 'ai', color: null };
+    const taggedArticle = {
+      ...createSnapshotArticle('3001', 'feed-1', 'Tagged Article'),
+      tags: [oldTag],
+    };
+    useAppStore.setState({
+      articles: [taggedArticle],
+      articleSnapshotCache: {
+        all: [taggedArticle],
+      },
+      tags: [{ ...oldTag, articleCount: 1 }],
+    });
+
+    useAppStore.getState().updateReaderTag('tag-1', { name: 'AI Draft', color: 'blue' });
+    useAppStore.getState().updateReaderTag('tag-1', { name: 'AI Final', color: 'green' });
+
+    firstPatchDeferred.resolve(
+      jsonResponse(
+        {
+          ok: false,
+          error: { code: 'internal_error', message: 'first update failed' },
+        },
+        { status: 500 },
+      ),
+    );
+    secondPatchDeferred.resolve(
+      jsonResponse(
+        {
+          ok: false,
+          error: { code: 'internal_error', message: 'second update failed' },
+        },
+        { status: 500 },
+      ),
+    );
+    await flushPromises();
+
+    expect(useAppStore.getState().tags).toEqual([{ ...oldTag, articleCount: 1 }]);
+    expect(useAppStore.getState().articles[0]?.tags).toEqual([oldTag]);
+    expect(useAppStore.getState().articleSnapshotCache.all?.[0]?.tags).toEqual([oldTag]);
+    expect(runImmediateFailureMock).toHaveBeenCalledTimes(1);
+    expect(runImmediateFailureMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionKey: 'tag.update',
+        context: { name: 'AI Final' },
+        err: expect.any(Error),
+      }),
+    );
+  });
+
+  it('rolls back to an older successful tag update when the newer update fails', async () => {
+    const firstPatchDeferred = createDeferred<Response>();
+    const secondPatchDeferred = createDeferred<Response>();
+    const snapshotDeferred = createDeferred<Response>();
+    let patchCount = 0;
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/tags/tag-1') && method === 'PATCH') {
+        patchCount += 1;
+        return patchCount === 1 ? firstPatchDeferred.promise : secondPatchDeferred.promise;
+      }
+
+      if (url.includes('/api/reader/snapshot') && method === 'GET') {
+        return snapshotDeferred.promise;
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    const oldTag = { id: 'tag-1', name: 'AI', slug: 'ai', color: null };
+    const taggedArticle = {
+      ...createSnapshotArticle('3001', 'feed-1', 'Tagged Article'),
+      tags: [oldTag],
+    };
+    useAppStore.setState({
+      articles: [taggedArticle],
+      articleDetailCache: {
+        '3001': {
+          ...taggedArticle,
+          content: '<p>content</p>',
+        },
+      },
+      articleSnapshotCache: {
+        all: [taggedArticle],
+      },
+      tags: [{ ...oldTag, articleCount: 1 }],
+    });
+
+    useAppStore.getState().updateReaderTag('tag-1', { name: 'AI Draft', color: 'blue' });
+    useAppStore.getState().updateReaderTag('tag-1', { name: 'AI Final', color: 'green' });
+
+    firstPatchDeferred.resolve(
+      jsonResponse({
+        ok: true,
+        data: {
+          tag: { id: 'tag-1', name: 'AI Draft', slug: 'ai-draft', color: 'blue' },
+        },
+      }),
+    );
+    await flushPromises();
+
+    secondPatchDeferred.resolve(
+      jsonResponse(
+        {
+          ok: false,
+          error: { code: 'internal_error', message: 'second update failed' },
+        },
+        { status: 500 },
+      ),
+    );
+    await flushPromises();
+
+    const draftTag = { id: 'tag-1', name: 'AI Draft', slug: 'ai-draft', color: 'blue' };
+    expect(useAppStore.getState().tags).toEqual([{ ...draftTag, articleCount: 1 }]);
+    expect(useAppStore.getState().articles[0]?.tags).toEqual([draftTag]);
+    expect(useAppStore.getState().articleDetailCache['3001']?.tags).toEqual([draftTag]);
+    expect(useAppStore.getState().articleSnapshotCache.all?.[0]?.tags).toEqual([draftTag]);
+    expect(runImmediateFailureMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionKey: 'tag.update',
+        context: { name: 'AI Final' },
+        err: expect.any(Error),
+      }),
+    );
+  });
+
+  it('keeps an older successful tag update when two later updates fail', async () => {
+    const firstPatchDeferred = createDeferred<Response>();
+    const secondPatchDeferred = createDeferred<Response>();
+    const thirdPatchDeferred = createDeferred<Response>();
+    const snapshotDeferred = createDeferred<Response>();
+    let patchCount = 0;
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/tags/tag-1') && method === 'PATCH') {
+        patchCount += 1;
+        if (patchCount === 1) return firstPatchDeferred.promise;
+        if (patchCount === 2) return secondPatchDeferred.promise;
+        return thirdPatchDeferred.promise;
+      }
+
+      if (url.includes('/api/reader/snapshot') && method === 'GET') {
+        return snapshotDeferred.promise;
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    const oldTag = { id: 'tag-1', name: 'AI', slug: 'ai', color: null };
+    const taggedArticle = {
+      ...createSnapshotArticle('3001', 'feed-1', 'Tagged Article'),
+      tags: [oldTag],
+    };
+    useAppStore.setState({
+      articles: [taggedArticle],
+      articleDetailCache: {
+        '3001': {
+          ...taggedArticle,
+          content: '<p>content</p>',
+        },
+      },
+      articleSnapshotCache: {
+        all: [taggedArticle],
+      },
+      tags: [{ ...oldTag, articleCount: 1 }],
+    });
+
+    useAppStore.getState().updateReaderTag('tag-1', { name: 'AI Draft', color: 'blue' });
+    useAppStore.getState().updateReaderTag('tag-1', { name: 'AI Review', color: 'purple' });
+
+    firstPatchDeferred.resolve(
+      jsonResponse({
+        ok: true,
+        data: {
+          tag: { id: 'tag-1', name: 'AI Draft', slug: 'ai-draft', color: 'blue' },
+        },
+      }),
+    );
+    await flushPromises();
+
+    useAppStore.getState().updateReaderTag('tag-1', { name: 'AI Final', color: 'green' });
+
+    secondPatchDeferred.resolve(
+      jsonResponse(
+        {
+          ok: false,
+          error: { code: 'internal_error', message: 'second update failed' },
+        },
+        { status: 500 },
+      ),
+    );
+    thirdPatchDeferred.resolve(
+      jsonResponse(
+        {
+          ok: false,
+          error: { code: 'internal_error', message: 'third update failed' },
+        },
+        { status: 500 },
+      ),
+    );
+    await flushPromises();
+
+    const draftTag = { id: 'tag-1', name: 'AI Draft', slug: 'ai-draft', color: 'blue' };
+    expect(useAppStore.getState().tags).toEqual([{ ...draftTag, articleCount: 1 }]);
+    expect(useAppStore.getState().articles[0]?.tags).toEqual([draftTag]);
+    expect(useAppStore.getState().articleDetailCache['3001']?.tags).toEqual([draftTag]);
+    expect(useAppStore.getState().articleSnapshotCache.all?.[0]?.tags).toEqual([draftTag]);
+    expect(runImmediateFailureMock).toHaveBeenCalledTimes(1);
+    expect(runImmediateFailureMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionKey: 'tag.update',
+        context: { name: 'AI Final' },
+        err: expect.any(Error),
+      }),
+    );
+  });
+
+  it('does not let an older late tag update success affect a later failed delete', async () => {
+    const firstPatchDeferred = createDeferred<Response>();
+    const secondPatchDeferred = createDeferred<Response>();
+    const deleteDeferred = createDeferred<Response>();
+    const snapshotDeferred = createDeferred<Response>();
+    let patchCount = 0;
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/tags/tag-1') && method === 'PATCH') {
+        patchCount += 1;
+        return patchCount === 1 ? firstPatchDeferred.promise : secondPatchDeferred.promise;
+      }
+
+      if (url.includes('/api/tags/tag-1') && method === 'DELETE') {
+        return deleteDeferred.promise;
+      }
+
+      if (url.includes('/api/reader/snapshot') && method === 'GET') {
+        return snapshotDeferred.promise;
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    const oldTag = { id: 'tag-1', name: 'AI', slug: 'ai', color: null };
+    const taggedArticle = {
+      ...createSnapshotArticle('3001', 'feed-1', 'Tagged Article'),
+      tags: [oldTag],
+    };
+    useAppStore.setState({
+      selectedView: 'all',
+      articles: [taggedArticle],
+      articleDetailCache: {
+        '3001': {
+          ...taggedArticle,
+          content: '<p>content</p>',
+        },
+      },
+      articleSnapshotCache: {
+        all: [taggedArticle],
+      },
+      tags: [{ ...oldTag, articleCount: 1 }],
+    });
+
+    useAppStore.getState().updateReaderTag('tag-1', { name: 'AI Draft', color: 'blue' });
+    useAppStore.getState().updateReaderTag('tag-1', { name: 'AI Final', color: 'green' });
+
+    secondPatchDeferred.resolve(
+      jsonResponse({
+        ok: true,
+        data: {
+          tag: { id: 'tag-1', name: 'AI Final', slug: 'ai-final', color: 'green' },
+        },
+      }),
+    );
+    await flushPromises();
+
+    firstPatchDeferred.resolve(
+      jsonResponse({
+        ok: true,
+        data: {
+          tag: { id: 'tag-1', name: 'AI Draft', slug: 'ai-draft', color: 'blue' },
+        },
+      }),
+    );
+    await flushPromises();
+
+    const finalTag = { id: 'tag-1', name: 'AI Final', slug: 'ai-final', color: 'green' };
+    useAppStore.getState().deleteReaderTag(finalTag);
+
+    deleteDeferred.resolve(
+      jsonResponse(
+        {
+          ok: false,
+          error: { code: 'internal_error', message: 'delete failed' },
+        },
+        { status: 500 },
+      ),
+    );
+    await flushPromises();
+
+    expect(useAppStore.getState().tags).toEqual([{ ...finalTag, articleCount: 1 }]);
+    expect(useAppStore.getState().articles[0]?.tags).toEqual([finalTag]);
+    expect(useAppStore.getState().articleDetailCache['3001']?.tags).toEqual([finalTag]);
+    expect(useAppStore.getState().articleSnapshotCache.all?.[0]?.tags).toEqual([finalTag]);
+  });
+
+  it('restores an older successful tag update when a newer update and following delete both fail', async () => {
+    const firstPatchDeferred = createDeferred<Response>();
+    const secondPatchDeferred = createDeferred<Response>();
+    const deleteDeferred = createDeferred<Response>();
+    const snapshotDeferred = createDeferred<Response>();
+    let patchCount = 0;
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/tags/tag-1') && method === 'PATCH') {
+        patchCount += 1;
+        return patchCount === 1 ? firstPatchDeferred.promise : secondPatchDeferred.promise;
+      }
+
+      if (url.includes('/api/tags/tag-1') && method === 'DELETE') {
+        return deleteDeferred.promise;
+      }
+
+      if (url.includes('/api/reader/snapshot') && method === 'GET') {
+        return snapshotDeferred.promise;
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    const oldTag = { id: 'tag-1', name: 'AI', slug: 'ai', color: null };
+    const taggedArticle = {
+      ...createSnapshotArticle('3001', 'feed-1', 'Tagged Article'),
+      tags: [oldTag],
+    };
+    useAppStore.setState({
+      selectedView: 'all',
+      articles: [taggedArticle],
+      articleDetailCache: {
+        '3001': {
+          ...taggedArticle,
+          content: '<p>content</p>',
+        },
+      },
+      articleSnapshotCache: {
+        all: [taggedArticle],
+      },
+      tags: [{ ...oldTag, articleCount: 1 }],
+    });
+
+    useAppStore.getState().updateReaderTag('tag-1', { name: 'AI Draft', color: 'blue' });
+    useAppStore.getState().updateReaderTag('tag-1', { name: 'AI Final', color: 'green' });
+
+    firstPatchDeferred.resolve(
+      jsonResponse({
+        ok: true,
+        data: {
+          tag: { id: 'tag-1', name: 'AI Draft', slug: 'ai-draft', color: 'blue' },
+        },
+      }),
+    );
+    await flushPromises();
+
+    useAppStore
+      .getState()
+      .deleteReaderTag({ id: 'tag-1', name: 'AI Final', slug: 'ai', color: 'green' });
+
+    secondPatchDeferred.resolve(
+      jsonResponse(
+        {
+          ok: false,
+          error: { code: 'internal_error', message: 'second update failed' },
+        },
+        { status: 500 },
+      ),
+    );
+    await flushPromises();
+
+    deleteDeferred.resolve(
+      jsonResponse(
+        {
+          ok: false,
+          error: { code: 'internal_error', message: 'delete failed' },
+        },
+        { status: 500 },
+      ),
+    );
+    await flushPromises();
+
+    const draftTag = { id: 'tag-1', name: 'AI Draft', slug: 'ai-draft', color: 'blue' };
+    expect(useAppStore.getState().tags).toEqual([{ ...draftTag, articleCount: 1 }]);
+    expect(useAppStore.getState().articles[0]?.tags).toEqual([draftTag]);
+    expect(useAppStore.getState().articleDetailCache['3001']?.tags).toEqual([draftTag]);
+    expect(useAppStore.getState().articleSnapshotCache.all?.[0]?.tags).toEqual([draftTag]);
+  });
+
+  it('does not restore the deleted tag view when delete fails after navigation', async () => {
+    const deleteDeferred = createDeferred<Response>();
+    const snapshotDeferred = createDeferred<Response>();
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/tags/tag-1') && method === 'DELETE') {
+        return deleteDeferred.promise;
+      }
+
+      if (url.includes('/api/reader/snapshot') && method === 'GET') {
+        return snapshotDeferred.promise;
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    const tag = { id: 'tag-1', name: 'AI', slug: 'ai', color: null };
+    const taggedArticle = {
+      ...createSnapshotArticle('3001', 'feed-1', 'Tagged Article'),
+      tags: [tag],
+    };
+    const feedArticle = {
+      ...createSnapshotArticle('3002', 'feed-2', 'Feed Two Article'),
+      tags: [tag],
+    };
+    useAppStore.setState({
+      selectedView: 'tag:tag-1',
+      selectedArticleId: '3001',
+      articles: [taggedArticle],
+      articleSnapshotCache: {
+        'feed-2': [feedArticle],
+      },
+      tags: [{ ...tag, articleCount: 1 }],
+    });
+
+    useAppStore.getState().deleteReaderTag(tag);
+    useAppStore.getState().setSelectedView('feed-2');
+
+    deleteDeferred.resolve(
+      jsonResponse(
+        {
+          ok: false,
+          error: { code: 'internal_error', message: 'delete failed' },
+        },
+        { status: 500 },
+      ),
+    );
+    await flushPromises();
+
+    expect(useAppStore.getState().selectedView).toBe('feed-2');
+    expect(useAppStore.getState().selectedArticleId).toBeNull();
+    expect(useAppStore.getState().articles).toEqual([feedArticle]);
+    expect(useAppStore.getState().articleSnapshotCache['feed-2']).toEqual([feedArticle]);
+    expect(useAppStore.getState().tags).toEqual([{ ...tag, articleCount: 1 }]);
+    expect(runImmediateFailureMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionKey: 'tag.delete',
+        context: { name: 'AI' },
+        err: expect.any(Error),
+      }),
+    );
+  });
+
+  it('rolls back to the pre-update tag when a pending update is followed by a failed delete', async () => {
+    const patchDeferred = createDeferred<Response>();
+    const deleteDeferred = createDeferred<Response>();
+    const snapshotDeferred = createDeferred<Response>();
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/tags/tag-1') && method === 'PATCH') {
+        return patchDeferred.promise;
+      }
+
+      if (url.includes('/api/tags/tag-1') && method === 'DELETE') {
+        return deleteDeferred.promise;
+      }
+
+      if (url.includes('/api/reader/snapshot') && method === 'GET') {
+        return snapshotDeferred.promise;
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    const oldTag = { id: 'tag-1', name: 'AI', slug: 'ai', color: null };
+    const taggedArticle = {
+      ...createSnapshotArticle('3001', 'feed-1', 'Tagged Article'),
+      tags: [oldTag],
+    };
+    useAppStore.setState({
+      selectedView: 'all',
+      articles: [taggedArticle],
+      articleDetailCache: {
+        '3001': {
+          ...taggedArticle,
+          content: '<p>content</p>',
+        },
+      },
+      articleSnapshotCache: {
+        all: [taggedArticle],
+      },
+      tags: [{ ...oldTag, articleCount: 1 }],
+    });
+
+    useAppStore.getState().updateReaderTag('tag-1', { name: 'AI Draft', color: 'blue' });
+    useAppStore.getState().deleteReaderTag(oldTag);
+
+    deleteDeferred.resolve(
+      jsonResponse(
+        {
+          ok: false,
+          error: { code: 'internal_error', message: 'delete failed' },
+        },
+        { status: 500 },
+      ),
+    );
+    await flushPromises();
+
+    patchDeferred.resolve(
+      jsonResponse(
+        {
+          ok: false,
+          error: { code: 'internal_error', message: 'update failed' },
+        },
+        { status: 500 },
+      ),
+    );
+    await flushPromises();
+
+    expect(useAppStore.getState().tags).toEqual([{ ...oldTag, articleCount: 1 }]);
+    expect(useAppStore.getState().articles[0]?.tags).toEqual([oldTag]);
+    expect(useAppStore.getState().articleDetailCache['3001']?.tags).toEqual([oldTag]);
+    expect(useAppStore.getState().articleSnapshotCache.all?.[0]?.tags).toEqual([oldTag]);
+    expect(runImmediateFailureMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionKey: 'tag.delete',
+        context: { name: 'AI' },
+        err: expect.any(Error),
+      }),
+    );
+  });
+
+  it('restores a successful pending update when the following tag delete fails', async () => {
+    const patchDeferred = createDeferred<Response>();
+    const deleteDeferred = createDeferred<Response>();
+    const snapshotDeferred = createDeferred<Response>();
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/tags/tag-1') && method === 'PATCH') {
+        return patchDeferred.promise;
+      }
+
+      if (url.includes('/api/tags/tag-1') && method === 'DELETE') {
+        return deleteDeferred.promise;
+      }
+
+      if (url.includes('/api/reader/snapshot') && method === 'GET') {
+        return snapshotDeferred.promise;
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    const oldTag = { id: 'tag-1', name: 'AI', slug: 'ai', color: null };
+    const taggedArticle = {
+      ...createSnapshotArticle('3001', 'feed-1', 'Tagged Article'),
+      tags: [oldTag],
+    };
+    useAppStore.setState({
+      selectedView: 'all',
+      articles: [taggedArticle],
+      articleDetailCache: {
+        '3001': {
+          ...taggedArticle,
+          content: '<p>content</p>',
+        },
+      },
+      articleSnapshotCache: {
+        all: [taggedArticle],
+      },
+      tags: [{ ...oldTag, articleCount: 1 }],
+    });
+
+    useAppStore.getState().updateReaderTag('tag-1', { name: 'AI Final', color: 'green' });
+    useAppStore.getState().deleteReaderTag(oldTag);
+
+    patchDeferred.resolve(
+      jsonResponse({
+        ok: true,
+        data: {
+          tag: { id: 'tag-1', name: 'AI Final', slug: 'ai-final', color: 'green' },
+        },
+      }),
+    );
+    await flushPromises();
+
+    deleteDeferred.resolve(
+      jsonResponse(
+        {
+          ok: false,
+          error: { code: 'internal_error', message: 'delete failed' },
+        },
+        { status: 500 },
+      ),
+    );
+    await flushPromises();
+
+    const finalTag = { id: 'tag-1', name: 'AI Final', slug: 'ai-final', color: 'green' };
+    expect(useAppStore.getState().tags).toEqual([{ ...finalTag, articleCount: 1 }]);
+    expect(useAppStore.getState().articles[0]?.tags).toEqual([finalTag]);
+    expect(useAppStore.getState().articleDetailCache['3001']?.tags).toEqual([finalTag]);
+    expect(useAppStore.getState().articleSnapshotCache.all?.[0]?.tags).toEqual([finalTag]);
+    expect(runImmediateFailureMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionKey: 'tag.delete',
+        context: { name: 'AI' },
+        err: expect.any(Error),
+      }),
+    );
+  });
+
+  it('restores selected tag-view articles with a successful pending update after delete failure', async () => {
+    const patchDeferred = createDeferred<Response>();
+    const deleteDeferred = createDeferred<Response>();
+    const snapshotDeferred = createDeferred<Response>();
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/tags/tag-1') && method === 'PATCH') {
+        return patchDeferred.promise;
+      }
+
+      if (url.includes('/api/tags/tag-1') && method === 'DELETE') {
+        return deleteDeferred.promise;
+      }
+
+      if (url.includes('/api/reader/snapshot') && method === 'GET') {
+        return snapshotDeferred.promise;
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    const oldTag = { id: 'tag-1', name: 'AI', slug: 'ai', color: null };
+    const taggedArticle = {
+      ...createSnapshotArticle('3001', 'feed-1', 'Tagged Article'),
+      tags: [oldTag],
+    };
+    useAppStore.setState({
+      selectedView: 'tag:tag-1',
+      selectedArticleId: '3001',
+      articles: [taggedArticle],
+      articleDetailCache: {
+        '3001': {
+          ...taggedArticle,
+          content: '<p>content</p>',
+        },
+      },
+      tags: [{ ...oldTag, articleCount: 1 }],
+    });
+
+    useAppStore.getState().updateReaderTag('tag-1', { name: 'AI Final', color: 'green' });
+    useAppStore.getState().deleteReaderTag(oldTag);
+
+    patchDeferred.resolve(
+      jsonResponse({
+        ok: true,
+        data: {
+          tag: { id: 'tag-1', name: 'AI Final', slug: 'ai-final', color: 'green' },
+        },
+      }),
+    );
+    await flushPromises();
+
+    deleteDeferred.resolve(
+      jsonResponse(
+        {
+          ok: false,
+          error: { code: 'internal_error', message: 'delete failed' },
+        },
+        { status: 500 },
+      ),
+    );
+    await flushPromises();
+
+    const finalTag = { id: 'tag-1', name: 'AI Final', slug: 'ai-final', color: 'green' };
+    expect(useAppStore.getState().selectedView).toBe('tag:tag-1');
+    expect(useAppStore.getState().selectedArticleId).toBe('3001');
+    expect(useAppStore.getState().tags).toEqual([{ ...finalTag, articleCount: 1 }]);
+    expect(useAppStore.getState().articles[0]?.tags).toEqual([finalTag]);
+    expect(useAppStore.getState().articleDetailCache['3001']?.tags).toEqual([finalTag]);
+    expect(useAppStore.getState().articleSnapshotCache['tag:tag-1']?.[0]?.tags).toEqual([
+      finalTag,
+    ]);
+  });
+
+  it('replaces stale snapshot tags when a selected tag delete reloads before update success', async () => {
+    const patchDeferred = createDeferred<Response>();
+    const deleteDeferred = createDeferred<Response>();
+    const snapshotDeferred = createDeferred<Response>();
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/tags/tag-1') && method === 'PATCH') {
+        return patchDeferred.promise;
+      }
+
+      if (url.includes('/api/tags/tag-1') && method === 'DELETE') {
+        return deleteDeferred.promise;
+      }
+
+      if (url.includes('/api/reader/snapshot') && method === 'GET') {
+        return snapshotDeferred.promise;
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    const oldTag = { id: 'tag-1', name: 'AI', slug: 'ai', color: null };
+    const taggedArticle = {
+      ...createSnapshotArticle('3001', 'feed-1', 'Tagged Article'),
+      tags: [oldTag],
+    };
+    useAppStore.setState({
+      selectedView: 'tag:tag-1',
+      selectedArticleId: '3001',
+      articles: [taggedArticle],
+      articleDetailCache: {
+        '3001': {
+          ...taggedArticle,
+          content: '<p>content</p>',
+        },
+      },
+      articleSnapshotCache: {},
+      tags: [{ ...oldTag, articleCount: 1 }],
+    });
+
+    useAppStore.getState().updateReaderTag('tag-1', { name: 'AI Final', color: 'green' });
+    useAppStore.getState().deleteReaderTag(oldTag);
+
+    useAppStore.setState((state) => ({
+      articles: [taggedArticle],
+      articleSnapshotCache: {
+        ...state.articleSnapshotCache,
+        all: [taggedArticle],
+      },
+    }));
+
+    patchDeferred.resolve(
+      jsonResponse({
+        ok: true,
+        data: {
+          tag: { id: 'tag-1', name: 'AI Final', slug: 'ai-final', color: 'green' },
+        },
+      }),
+    );
+    await flushPromises();
+
+    deleteDeferred.resolve(
+      jsonResponse(
+        {
+          ok: false,
+          error: { code: 'internal_error', message: 'delete failed' },
+        },
+        { status: 500 },
+      ),
+    );
+    await flushPromises();
+
+    const finalTag = { id: 'tag-1', name: 'AI Final', slug: 'ai-final', color: 'green' };
+    expect(useAppStore.getState().selectedView).toBe('tag:tag-1');
+    expect(useAppStore.getState().tags).toEqual([{ ...finalTag, articleCount: 1 }]);
+    expect(useAppStore.getState().articles[0]?.tags).toEqual([finalTag]);
+    expect(useAppStore.getState().articleDetailCache['3001']?.tags).toEqual([finalTag]);
+    expect(useAppStore.getState().articleSnapshotCache.all?.[0]?.tags).toEqual([finalTag]);
+    expect(useAppStore.getState().articleSnapshotCache['tag:tag-1']?.[0]?.tags).toEqual([
+      finalTag,
+    ]);
+  });
+
+  it('removes stale snapshot tags when selected tag delete succeeds after a stale reload', async () => {
+    const deleteDeferred = createDeferred<Response>();
+    const snapshotDeferred = createDeferred<Response>();
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/tags/tag-1') && method === 'DELETE') {
+        return deleteDeferred.promise;
+      }
+
+      if (url.includes('/api/reader/snapshot') && method === 'GET') {
+        return snapshotDeferred.promise;
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    const tag = { id: 'tag-1', name: 'AI', slug: 'ai', color: null };
+    const taggedArticle = {
+      ...createSnapshotArticle('3001', 'feed-1', 'Tagged Article'),
+      tags: [tag],
+    };
+    useAppStore.setState({
+      selectedView: 'tag:tag-1',
+      selectedArticleId: '3001',
+      articles: [taggedArticle],
+      articleDetailCache: {
+        '3001': {
+          ...taggedArticle,
+          content: '<p>content</p>',
+        },
+      },
+      articleSnapshotCache: {},
+      tags: [{ ...tag, articleCount: 1 }],
+    });
+
+    useAppStore.getState().deleteReaderTag(tag);
+
+    useAppStore.setState((state) => ({
+      articles: [taggedArticle],
+      articleSnapshotCache: {
+        ...state.articleSnapshotCache,
+        all: [taggedArticle],
+      },
+      tags: [{ ...tag, articleCount: 1 }],
+    }));
+
+    deleteDeferred.resolve(
+      jsonResponse({
+        ok: true,
+        data: { removed: true, affectedArticleCount: 1 },
+      }),
+    );
+    await flushPromises();
+
+    expect(useAppStore.getState().selectedView).toBe('all');
+    expect(useAppStore.getState().tags).toEqual([]);
+    expect(useAppStore.getState().articles[0]?.tags).toEqual([]);
+    expect(useAppStore.getState().articleDetailCache['3001']?.tags).toEqual([]);
+    expect(useAppStore.getState().articleSnapshotCache.all?.[0]?.tags).toEqual([]);
+    expect(useAppStore.getState().articleSnapshotCache['tag:tag-1']?.[0]?.tags).toEqual([]);
+  });
+
+  it('ignores stale snapshot tags that arrive after selected tag delete succeeds', async () => {
+    const deleteDeferred = createDeferred<Response>();
+    const snapshotDeferred = createDeferred<Response>();
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/tags/tag-1') && method === 'DELETE') {
+        return deleteDeferred.promise;
+      }
+
+      if (url.includes('/api/reader/snapshot') && method === 'GET') {
+        return snapshotDeferred.promise;
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    const tag = { id: 'tag-1', name: 'AI', slug: 'ai', color: null };
+    const taggedArticle = {
+      ...createSnapshotArticle('3001', 'feed-1', 'Tagged Article'),
+      tags: [tag],
+    };
+    useAppStore.setState({
+      selectedView: 'tag:tag-1',
+      selectedArticleId: '3001',
+      articles: [taggedArticle],
+      articleDetailCache: {
+        '3001': {
+          ...taggedArticle,
+          content: '<p>content</p>',
+        },
+      },
+      articleSnapshotCache: {},
+      tags: [{ ...tag, articleCount: 1 }],
+    });
+
+    useAppStore.getState().deleteReaderTag(tag);
+
+    deleteDeferred.resolve(
+      jsonResponse({
+        ok: true,
+        data: { removed: true, affectedArticleCount: 1 },
+      }),
+    );
+    await flushPromises();
+
+    snapshotDeferred.resolve(
+      jsonResponse({
+        ok: true,
+        data: {
+          ...createSnapshotPage({
+            items: [taggedArticle],
+            totalCount: 1,
+          }),
+          tags: [{ ...tag, articleCount: 1 }],
+        },
+      }),
+    );
+    await flushPromises();
+
+    expect(useAppStore.getState().selectedView).toBe('all');
+    expect(useAppStore.getState().tags).toEqual([]);
+    expect(useAppStore.getState().articles[0]?.tags).toEqual([]);
+    expect(useAppStore.getState().articleSnapshotCache.all?.[0]?.tags).toEqual([]);
+  });
+
+  it('does not restore the deleted tag view when delete fails after explicitly selecting all', async () => {
+    const deleteDeferred = createDeferred<Response>();
+    const snapshotDeferred = createDeferred<Response>();
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = getFetchCallUrl(input);
+      const method = getFetchCallMethod(input, init);
+
+      if (url.includes('/api/tags/tag-1') && method === 'DELETE') {
+        return deleteDeferred.promise;
+      }
+
+      if (url.includes('/api/reader/snapshot') && method === 'GET') {
+        return snapshotDeferred.promise;
+      }
+
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    const tag = { id: 'tag-1', name: 'AI', slug: 'ai', color: null };
+    const taggedArticle = {
+      ...createSnapshotArticle('3001', 'feed-1', 'Tagged Article'),
+      tags: [tag],
+    };
+    const allArticle = createSnapshotArticle('3002', 'feed-2', 'All Article');
+    useAppStore.setState({
+      selectedView: 'tag:tag-1',
+      selectedArticleId: '3001',
+      articles: [taggedArticle],
+      articleSnapshotCache: {
+        all: [allArticle],
+      },
+      tags: [{ ...tag, articleCount: 1 }],
+    });
+
+    useAppStore.getState().deleteReaderTag(tag);
+    useAppStore.getState().setSelectedView('all');
+
+    deleteDeferred.resolve(
+      jsonResponse(
+        {
+          ok: false,
+          error: { code: 'internal_error', message: 'delete failed' },
+        },
+        { status: 500 },
+      ),
+    );
+    await flushPromises();
+
+    expect(useAppStore.getState().selectedView).toBe('all');
+    expect(useAppStore.getState().selectedArticleId).toBeNull();
+    expect(useAppStore.getState().articles).toEqual([allArticle]);
+    expect(useAppStore.getState().tags).toEqual([{ ...tag, articleCount: 1 }]);
   });
 
   it('bulk patches visible articles optimistically, persists de-duplicated ids, and emits success context', async () => {

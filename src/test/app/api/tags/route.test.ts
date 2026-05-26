@@ -57,12 +57,12 @@ describe('/api/tags', () => {
     expect(listTagsWithVisibleArticleCountsMock).toHaveBeenCalledWith(pool);
   });
 
-  it('PATCH /api/tags/[tagId] updates a tag', async () => {
+  it('PATCH /api/tags/[tagId] updates a tag with normalized whitespace', async () => {
     const tagId = '00000000-0000-4000-8000-000000000001';
     updateArticleTagMock.mockResolvedValue({
       id: tagId,
-      name: 'AI',
-      slug: 'ai',
+      name: 'AI Research',
+      slug: 'ai-research',
       color: 'blue',
     });
     const mod = await import('@/app/api/tags/[tagId]/route');
@@ -70,7 +70,7 @@ describe('/api/tags', () => {
     const res = await mod.PATCH(
       new Request('http://localhost/api/tags/' + tagId, {
         method: 'PATCH',
-        body: JSON.stringify({ name: ' AI ', color: 'blue' }),
+        body: JSON.stringify({ name: '  AI   Research  ', color: 'blue' }),
       }),
       { params: Promise.resolve({ tagId }) },
     );
@@ -81,15 +81,41 @@ describe('/api/tags', () => {
       data: {
         tag: {
           id: tagId,
-          name: 'AI',
-          slug: 'ai',
+          name: 'AI Research',
+          slug: 'ai-research',
           color: 'blue',
         },
       },
     });
     expect(updateArticleTagMock).toHaveBeenCalledWith(pool, tagId, {
-      name: 'AI',
+      name: 'AI Research',
       color: 'blue',
+    });
+  });
+
+  it('PATCH /api/tags/[tagId] validates max length after collapsing whitespace', async () => {
+    const tagId = '00000000-0000-4000-8000-000000000001';
+    updateArticleTagMock.mockResolvedValue({
+      id: tagId,
+      name: 'AI Research',
+      slug: 'ai-research',
+      color: null,
+    });
+    const mod = await import('@/app/api/tags/[tagId]/route');
+
+    const res = await mod.PATCH(
+      new Request('http://localhost/api/tags/' + tagId, {
+        method: 'PATCH',
+        body: JSON.stringify({ name: `AI${' '.repeat(80)}Research` }),
+      }),
+      { params: Promise.resolve({ tagId }) },
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.ok).toBe(true);
+    expect(updateArticleTagMock).toHaveBeenCalledWith(pool, tagId, {
+      name: 'AI Research',
     });
   });
 

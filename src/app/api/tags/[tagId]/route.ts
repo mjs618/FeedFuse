@@ -25,7 +25,7 @@ const patchBodySchema = z
   .object({
     name: z
       .string()
-      .transform((value) => value.trim())
+      .transform((value) => value.trim().replace(/\s+/g, ' '))
       .pipe(
         z
           .string()

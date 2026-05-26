@@ -17,6 +17,14 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
@@ -1064,7 +1072,7 @@ export default function FeedList({
         }}
       />
 
-      <AlertDialog
+      <Dialog
         open={Boolean(activeRenameTag)}
         onOpenChange={(open) => {
           if (!open) {
@@ -1072,13 +1080,13 @@ export default function FeedList({
           }
         }}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>重命名标签</AlertDialogTitle>
-            <AlertDialogDescription className="break-words">
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>重命名标签</DialogTitle>
+            <DialogDescription className="break-words">
               修改标签名称后，已标记的文章会同步显示新名称。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
+            </DialogDescription>
+          </DialogHeader>
           <div className="space-y-2">
             <label htmlFor="rename-tag-name" className="text-sm font-medium">
               标签名称
@@ -1096,14 +1104,18 @@ export default function FeedList({
             />
             {renameTagError ? <p className="text-sm text-destructive">{renameTagError}</p> : null}
           </div>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={saveRenameTag}>保存</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={resetRenameTagDialog}>
+              取消
+            </Button>
+            <Button type="button" onClick={saveRenameTag}>
+              保存
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      <AlertDialog
+      <Dialog
         open={Boolean(activeColorTag)}
         onOpenChange={(open) => {
           if (!open) {
@@ -1112,13 +1124,13 @@ export default function FeedList({
           }
         }}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>更改标签颜色</AlertDialogTitle>
-            <AlertDialogDescription className="break-words">
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>更改标签颜色</DialogTitle>
+            <DialogDescription className="break-words">
               为标签选择侧边栏颜色。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
+            </DialogDescription>
+          </DialogHeader>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             <button
               type="button"
@@ -1153,12 +1165,23 @@ export default function FeedList({
               );
             })}
           </div>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={saveTagColor}>保存颜色</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setColorTagId(null);
+                setDraftTagColor(null);
+              }}
+            >
+              取消
+            </Button>
+            <Button type="button" onClick={saveTagColor}>
+              保存颜色
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog
         open={Boolean(activeDeleteTag)}

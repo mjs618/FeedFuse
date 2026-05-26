@@ -1985,6 +1985,36 @@ describe('FeedList manage', () => {
     expect(useAppStore.getState().selectedView).toBe('tag:tag-1');
   });
 
+  it('opens tag rename as a regular dialog', async () => {
+    useAppStore.setState({
+      tags: [{ id: 'tag-1', name: 'AI', slug: 'ai', color: null, articleCount: 2 }],
+      selectedView: 'all',
+    });
+
+    render(<FeedList />);
+
+    fireEvent.contextMenu(screen.getByRole('button', { name: /AI/ }));
+    fireEvent.click((await screen.findAllByRole('menuitem'))[0]);
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  });
+
+  it('opens tag color picker as a regular dialog', async () => {
+    useAppStore.setState({
+      tags: [{ id: 'tag-1', name: 'AI', slug: 'ai', color: 'blue', articleCount: 2 }],
+      selectedView: 'all',
+    });
+
+    render(<FeedList />);
+
+    fireEvent.contextMenu(screen.getByRole('button', { name: /AI/ }));
+    fireEvent.click((await screen.findAllByRole('menuitem'))[1]);
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  });
+
   it('opens tag context menu and renames a tag', async () => {
     const updateReaderTag = vi.fn();
     useAppStore.setState({
