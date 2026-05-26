@@ -56,6 +56,7 @@ import { ToastHost } from '../../../features/toast/components/ToastHost';
 import { useAppStore } from '../../../store/appStore';
 import { READER_PANE_ACTIVE_ITEM_CLASS_NAME } from '@/lib/ui/designSystem';
 import { AI_DIGEST_VIEW_ID, ARCHIVED_VIEW_ID, READ_LATER_VIEW_ID } from '@/lib/reader/view';
+import { TAG_COLOR_PRESETS, getTagColorClasses } from '@/lib/reader/tagColors';
 
 const LEFT_RAIL_UNREAD_BADGE_CLASS_NAME =
   'bg-[color-mix(in_oklab,var(--color-background)_86%,white_14%)]';
@@ -1982,6 +1983,111 @@ describe('FeedList manage', () => {
     fireEvent.click(screen.getByRole('button', { name: /AI/ }));
 
     expect(useAppStore.getState().selectedView).toBe('tag:tag-1');
+  });
+
+  it('opens tag context menu and renames a tag', async () => {
+    const updateReaderTag = vi.fn();
+    useAppStore.setState({
+      tags: [{ id: 'tag-1', name: 'AI', slug: 'ai', color: null, articleCount: 2 }],
+      selectedView: 'all',
+      updateReaderTag,
+    });
+
+    render(<FeedList />);
+
+    fireEvent.contextMenu(screen.getByRole('button', { name: /AI/ }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: '重命名' }));
+    fireEvent.change(screen.getByLabelText('标签名称'), { target: { value: '   ' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    expect(screen.getByText('请输入标签名称')).toBeInTheDocument();
+    expect(updateReaderTag).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText('标签名称'), { target: { value: '  AI   Research  ' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    expect(updateReaderTag).toHaveBeenCalledWith('tag-1', { name: 'AI Research' });
+  });
+
+  it('opens tag color dialog and saves the default color', async () => {
+    const updateReaderTag = vi.fn();
+    useAppStore.setState({
+      tags: [{ id: 'tag-1', name: 'AI', slug: 'ai', color: 'blue', articleCount: 2 }],
+      selectedView: 'all',
+      updateReaderTag,
+    });
+
+    render(<FeedList />);
+
+    fireEvent.contextMenu(screen.getByRole('button', { name: /AI/ }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: '更改颜色' }));
+
+    const labelsByColor = {
+      slate: '灰色',
+      red: '红色',
+      orange: '橙色',
+      amber: '琥珀色',
+      green: '绿色',
+      teal: '青绿色',
+      cyan: '青色',
+      blue: '蓝色',
+      violet: '紫色',
+      pink: '粉色',
+    } as const;
+    const blueButton = await screen.findByRole('button', { name: '蓝色' });
+
+    expect(screen.getByRole('button', { name: '默认' })).toBeInTheDocument();
+    TAG_COLOR_PRESETS.forEach((color) => {
+      expect(screen.getByRole('button', { name: labelsByColor[color] })).toBeInTheDocument();
+    });
+    expect(blueButton).toHaveAttribute('aria-pressed', 'true');
+    expect(blueButton).toHaveClass('border-primary', 'ring-1', 'ring-primary/30');
+    expect(blueButton.querySelector(`.${getTagColorClasses('blue').dot}`)).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '默认' }));
+    expect(screen.getByRole('button', { name: '默认' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: '保存颜色' }));
+
+    expect(updateReaderTag).toHaveBeenCalledWith('tag-1', { color: null });
+  });
+
+  it('confirms tag delete with affected article count', async () => {
+    const deleteReaderTag = vi.fn();
+    useAppStore.setState({
+      tags: [{ id: 'tag-1', name: 'AI', slug: 'ai', color: 'blue', articleCount: 12 }],
+      selectedView: 'all',
+      deleteReaderTag,
+    });
+
+    render(<FeedList />);
+
+    fireEvent.contextMenu(screen.getByRole('button', { name: /AI/ }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: '删除标签' }));
+
+    const dialog = await screen.findByRole('alertdialog');
+    expect(within(dialog).getByText(/12 篇文章/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/不会删除文章/)).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '删除标签' }));
+
+    expect(deleteReaderTag).toHaveBeenCalledWith({
+      id: 'tag-1',
+      name: 'AI',
+      slug: 'ai',
+      color: 'blue',
+    });
+  });
+
+  it('shows the tag color on the sidebar row', () => {
+    useAppStore.setState({
+      tags: [{ id: 'tag-1', name: 'AI', slug: 'ai', color: 'blue', articleCount: 2 }],
+      selectedView: 'all',
+    });
+
+    render(<FeedList />);
+
+    const tagButton = screen.getByRole('button', { name: /AI/ });
+    expect(tagButton.querySelector('.text-blue-500')).not.toBeNull();
   });
 
   it('does not commit again when unrelated app store state changes', () => {

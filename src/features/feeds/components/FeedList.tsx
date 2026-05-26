@@ -1,6 +1,6 @@
 import dynamic from 'next/dynamic';
-import { AlertCircle, Archive, ArrowDown, ArrowUp, ChevronDown, ChevronRight, Clock3, FileText, FolderTree, Languages, Newspaper, PencilLine, Plus, Power, Sparkles, Star, Tag, Trash2 } from 'lucide-react';
-import { type KeyboardEvent, useMemo, useState } from 'react';
+import { AlertCircle, Archive, ArrowDown, ArrowUp, ChevronDown, ChevronRight, Clock3, FileText, FolderTree, Languages, Newspaper, Palette, PencilLine, Plus, Power, Sparkles, Star, Tag, Trash2 } from 'lucide-react';
+import { type KeyboardEvent, type MouseEvent, useMemo, useState } from 'react';
 import { useAppStore } from '../../../store/appStore';
 import type { ViewType } from '../../../types';
 import { Badge } from '@/components/ui/badge';
@@ -38,12 +38,25 @@ import {
 import { runImmediateOperation } from '../../notifications/userOperationNotifier';
 import { cn } from '@/lib/utils';
 import { AI_DIGEST_VIEW_ID, ARCHIVED_VIEW_ID, READ_LATER_VIEW_ID } from '@/lib/reader/view';
+import { TAG_COLOR_PRESETS, type TagColorPreset, getTagColorClasses } from '@/lib/reader/tagColors';
 import { useHydratedSelectedView } from '../../../hooks';
 
 const uncategorizedName = '未分类';
 const uncategorizedId = 'cat-uncategorized';
 const LEFT_RAIL_UNREAD_BADGE_CLASS_NAME =
   'border-border/60 bg-[color-mix(in_oklab,var(--color-background)_86%,white_14%)] text-muted-foreground dark:border-white/[0.08] dark:bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-card)_90%)] dark:text-foreground/86';
+const TAG_COLOR_LABELS: Record<TagColorPreset, string> = {
+  slate: '灰色',
+  red: '红色',
+  orange: '橙色',
+  amber: '琥珀色',
+  green: '绿色',
+  teal: '青绿色',
+  cyan: '青色',
+  blue: '蓝色',
+  violet: '紫色',
+  pink: '粉色',
+};
 const AddFeedDialog = dynamic(() => import('./AddFeedDialog'), { ssr: false, loading: () => null });
 const AddAiDigestDialog = dynamic(() => import('./AddAiDigestDialog'), { ssr: false, loading: () => null });
 const EditFeedDialog = dynamic(() => import('./EditFeedDialog'), { ssr: false, loading: () => null });
@@ -96,6 +109,8 @@ export default function FeedList({
   const addFeed = useAppStore((state) => state.addFeed);
   const updateFeed = useAppStore((state) => state.updateFeed);
   const removeFeed = useAppStore((state) => state.removeFeed);
+  const updateReaderTag = useAppStore((state) => state.updateReaderTag);
+  const deleteReaderTag = useAppStore((state) => state.deleteReaderTag);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [addFeedOpen, setAddFeedOpen] = useState(false);
   const [addAiDigestOpen, setAddAiDigestOpen] = useState(false);
@@ -107,6 +122,12 @@ export default function FeedList({
   const [translationPolicyFeedId, setTranslationPolicyFeedId] = useState<string | null>(null);
   const [renameCategoryId, setRenameCategoryId] = useState<string | null>(null);
   const [deleteCategoryId, setDeleteCategoryId] = useState<string | null>(null);
+  const [renameTagId, setRenameTagId] = useState<string | null>(null);
+  const [renameTagName, setRenameTagName] = useState('');
+  const [renameTagError, setRenameTagError] = useState<string | null>(null);
+  const [colorTagId, setColorTagId] = useState<string | null>(null);
+  const [draftTagColor, setDraftTagColor] = useState<TagColorPreset | null>(null);
+  const [deleteTagId, setDeleteTagId] = useState<string | null>(null);
   const [hoveredFeedErrorId, setHoveredFeedErrorId] = useState<string | null>(null);
 
   const allArticlesUnreadCount = useMemo(
@@ -262,6 +283,18 @@ export default function FeedList({
     () => (deleteCategoryId ? categoryMaster.find((category) => category.id === deleteCategoryId) ?? null : null),
     [categoryMaster, deleteCategoryId],
   );
+  const activeRenameTag = useMemo(
+    () => (renameTagId ? tags.find((tag) => tag.id === renameTagId) ?? null : null),
+    [renameTagId, tags],
+  );
+  const activeColorTag = useMemo(
+    () => (colorTagId ? tags.find((tag) => tag.id === colorTagId) ?? null : null),
+    [colorTagId, tags],
+  );
+  const activeDeleteTag = useMemo(
+    () => (deleteTagId ? tags.find((tag) => tag.id === deleteTagId) ?? null : null),
+    [deleteTagId, tags],
+  );
   const activeFulltextPolicyFeed = useMemo(
     () => (fulltextPolicyFeedId ? feeds.find((feed) => feed.id === fulltextPolicyFeedId) ?? null : null),
     [fulltextPolicyFeedId, feeds],
@@ -346,6 +379,49 @@ export default function FeedList({
     } catch {
       // apiClient handles failure notifications globally
     }
+  };
+
+  const isTagColorPreset = (color: string | null | undefined): color is TagColorPreset =>
+    typeof color === 'string' && TAG_COLOR_PRESETS.includes(color as TagColorPreset);
+
+  const resetRenameTagDialog = () => {
+    setRenameTagId(null);
+    setRenameTagName('');
+    setRenameTagError(null);
+  };
+
+  const saveRenameTag = (event: MouseEvent<HTMLButtonElement>) => {
+    if (!activeRenameTag) return;
+
+    const name = renameTagName.trim().replace(/\s+/g, ' ');
+    if (!name) {
+      event.preventDefault();
+      setRenameTagError('请输入标签名称');
+      return;
+    }
+
+    updateReaderTag(activeRenameTag.id, { name });
+    resetRenameTagDialog();
+  };
+
+  const saveTagColor = () => {
+    if (!activeColorTag) return;
+
+    updateReaderTag(activeColorTag.id, { color: draftTagColor });
+    setColorTagId(null);
+    setDraftTagColor(null);
+  };
+
+  const confirmDeleteTag = () => {
+    if (!activeDeleteTag) return;
+
+    deleteReaderTag({
+      id: activeDeleteTag.id,
+      name: activeDeleteTag.name,
+      slug: activeDeleteTag.slug,
+      color: activeDeleteTag.color,
+    });
+    setDeleteTagId(null);
   };
 
   return (
@@ -460,10 +536,9 @@ export default function FeedList({
               {tags.map((tag) => {
                 const viewId = `tag:${tag.id}`;
                 const selected = renderedSelectedView === viewId;
-
-                return (
+                const tagColorClasses = getTagColorClasses(tag.color);
+                const tagButton = (
                   <button
-                    key={tag.id}
                     type="button"
                     onClick={() => setSelectedView(viewId)}
                     aria-current={selected ? 'true' : undefined}
@@ -478,7 +553,13 @@ export default function FeedList({
                     )}
                   >
                     <div className="flex min-w-0 items-center">
-                      <Tag aria-hidden="true" className="mr-2 inline-block h-4 w-4 shrink-0 align-[-2px]" />
+                      <Tag
+                        aria-hidden="true"
+                        className={cn(
+                          'mr-2 inline-block h-4 w-4 shrink-0 align-[-2px]',
+                          tagColorClasses.icon,
+                        )}
+                      />
                       <span className="truncate">{tag.name}</span>
                     </div>
                     <Badge
@@ -492,6 +573,44 @@ export default function FeedList({
                       {tag.articleCount}
                     </Badge>
                   </button>
+                );
+
+                return (
+                  <ContextMenu key={tag.id}>
+                    <ContextMenuTrigger asChild>{tagButton}</ContextMenuTrigger>
+                    <ContextMenuContent className="w-44">
+                      <ContextMenuItem
+                        onSelect={() => {
+                          setRenameTagId(tag.id);
+                          setRenameTagName(tag.name);
+                          setRenameTagError(null);
+                        }}
+                      >
+                        <ContextMenuItemIcon aria-hidden="true">
+                          <PencilLine className="h-3.5 w-3.5" />
+                        </ContextMenuItemIcon>
+                        <ContextMenuItemLabel>重命名</ContextMenuItemLabel>
+                      </ContextMenuItem>
+                      <ContextMenuItem
+                        onSelect={() => {
+                          setColorTagId(tag.id);
+                          setDraftTagColor(isTagColorPreset(tag.color) ? tag.color : null);
+                        }}
+                      >
+                        <ContextMenuItemIcon aria-hidden="true">
+                          <Palette className="h-3.5 w-3.5" />
+                        </ContextMenuItemIcon>
+                        <ContextMenuItemLabel>更改颜色</ContextMenuItemLabel>
+                      </ContextMenuItem>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem variant="destructive" onSelect={() => setDeleteTagId(tag.id)}>
+                        <ContextMenuItemIcon aria-hidden="true" className="text-current">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </ContextMenuItemIcon>
+                        <ContextMenuItemLabel>删除标签</ContextMenuItemLabel>
+                      </ContextMenuItem>
+                    </ContextMenuContent>
+                  </ContextMenu>
                 );
               })}
             </div>
@@ -944,6 +1063,130 @@ export default function FeedList({
           await updateFeed(activeTranslationPolicyFeed.id, patch);
         }}
       />
+
+      <AlertDialog
+        open={Boolean(activeRenameTag)}
+        onOpenChange={(open) => {
+          if (!open) {
+            resetRenameTagDialog();
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>重命名标签</AlertDialogTitle>
+            <AlertDialogDescription className="break-words">
+              修改标签名称后，已标记的文章会同步显示新名称。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2">
+            <label htmlFor="rename-tag-name" className="text-sm font-medium">
+              标签名称
+            </label>
+            <input
+              id="rename-tag-name"
+              value={renameTagName}
+              onChange={(event) => {
+                setRenameTagName(event.target.value);
+                if (renameTagError) {
+                  setRenameTagError(null);
+                }
+              }}
+              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/20"
+            />
+            {renameTagError ? <p className="text-sm text-destructive">{renameTagError}</p> : null}
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={saveRenameTag}>保存</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={Boolean(activeColorTag)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setColorTagId(null);
+            setDraftTagColor(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>更改标签颜色</AlertDialogTitle>
+            <AlertDialogDescription className="break-words">
+              为标签选择侧边栏颜色。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <button
+              type="button"
+              aria-pressed={draftTagColor === null}
+              onClick={() => setDraftTagColor(null)}
+              className={cn(
+                'flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium transition-colors hover:bg-accent/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/20',
+                draftTagColor === null ? 'border-primary ring-1 ring-primary/30' : 'border-border',
+              )}
+            >
+              <span aria-hidden="true" className={cn('h-2.5 w-2.5 rounded-full', getTagColorClasses(null).dot)} />
+              默认
+            </button>
+            {TAG_COLOR_PRESETS.map((color) => {
+              const colorClasses = getTagColorClasses(color);
+              const selected = draftTagColor === color;
+
+              return (
+                <button
+                  key={color}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => setDraftTagColor(color)}
+                  className={cn(
+                    'flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium transition-colors hover:bg-accent/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/20',
+                    selected ? 'border-primary ring-1 ring-primary/30' : 'border-border',
+                  )}
+                >
+                  <span aria-hidden="true" className={cn('h-2.5 w-2.5 rounded-full', colorClasses.dot)} />
+                  {TAG_COLOR_LABELS[color]}
+                </button>
+              );
+            })}
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={saveTagColor}>保存颜色</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={Boolean(activeDeleteTag)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteTagId(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除标签</AlertDialogTitle>
+            <AlertDialogDescription className="break-words">
+              {activeDeleteTag
+                ? `确定删除「${activeDeleteTag.name}」标签？此标签当前用于 ${activeDeleteTag.articleCount} 篇文章。删除标签只会从文章上移除该标签，不会删除文章。`
+                : '确定删除该标签？删除标签不会删除文章。'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction asChild>
+              <Button type="button" variant="destructive" onClick={confirmDeleteTag}>
+                删除标签
+              </Button>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={Boolean(deleteFeedId)}
