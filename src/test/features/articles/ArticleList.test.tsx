@@ -419,6 +419,24 @@ describe('ArticleList', () => {
     expect(screen.getByText('+1')).toBeInTheDocument();
   });
 
+  it('renders article tag badge with its configured color', () => {
+    useAppStore.setState({
+      showUnreadOnly: false,
+      articles: [
+        createArticle({
+          id: 'colored-tag-article',
+          title: 'Colored Tag Article',
+          tags: [{ id: 'tag-blue', name: 'AI', slug: 'ai', color: 'blue' }],
+        }),
+      ],
+      selectedArticleId: 'colored-tag-article',
+    });
+
+    renderWithNotifications();
+
+    expect(screen.getByText('AI')).toHaveClass('border-blue-300');
+  });
+
   it('renders an empty tag view message', () => {
     useAppStore.setState({
       selectedView: 'tag:tag-1',

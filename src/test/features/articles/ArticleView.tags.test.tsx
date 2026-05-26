@@ -96,6 +96,22 @@ describe('ArticleView tag editor', () => {
     });
   });
 
+  it('renders existing tag badge with its configured color', () => {
+    const article = createArticle();
+    const articleWithBlueTag = {
+      ...article,
+      tags: [{ id: 'tag-1', name: 'AI', slug: 'ai', color: 'blue' }],
+    };
+    useAppStore.setState({
+      articles: [articleWithBlueTag],
+      articleDetailCache: { 'article-1': articleWithBlueTag },
+    });
+
+    render(<ArticleView />);
+
+    expect(screen.getByText('AI').closest('span.inline-flex')).toHaveClass('border-blue-300');
+  });
+
   it('adds a tag with Enter and clears the input', () => {
     render(<ArticleView />);
 

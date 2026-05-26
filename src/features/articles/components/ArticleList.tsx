@@ -52,6 +52,7 @@ import {
   isAggregateView as isAggregateReaderView,
   shouldUseDefaultUnreadOnly,
 } from "@/lib/reader/view";
+import { getTagColorClasses } from "@/lib/reader/tagColors";
 import type { ViewType } from "../../../types";
 import ReaderToolbarIconButton from "../../reader/components/ReaderToolbarIconButton";
 import {
@@ -1130,15 +1131,22 @@ export default function ArticleList({
 
     return (
       <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1">
-        {visibleTags.map((tag) => (
-          <Badge
-            key={tag.id}
-            variant="secondary"
-            className="h-5 max-w-28 truncate px-1.5 text-[10px] font-medium"
-          >
-            {tag.name}
-          </Badge>
-        ))}
+        {visibleTags.map((tag) => {
+          const colorClasses = getTagColorClasses(tag.color);
+
+          return (
+            <Badge
+              key={tag.id}
+              variant="secondary"
+              className={cn(
+                "h-5 max-w-28 truncate px-1.5 text-[10px] font-medium",
+                colorClasses.badge,
+              )}
+            >
+              {tag.name}
+            </Badge>
+          );
+        })}
         {overflowCount > 0 ? (
           <Badge variant="secondary" className="h-5 px-1.5 text-[10px] font-medium">
             +{overflowCount}

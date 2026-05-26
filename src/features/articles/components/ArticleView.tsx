@@ -32,6 +32,7 @@ import {
   type ArticleTasksDto,
 } from "@/lib/api/apiClient";
 import { pollWithBackoff } from "@/lib/api/polling";
+import { getTagColorClasses } from "@/lib/reader/tagColors";
 import { useRenderTimeSnapshot } from "../../../hooks";
 import { formatRelativeTime } from "../../../utils/date";
 import { Badge } from "@/components/ui/badge";
@@ -586,23 +587,33 @@ export default function ArticleView({
     return (
       <div className="mt-3 flex flex-col gap-2">
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-          {(article.tags ?? []).map((tag) => (
-            <span
-              key={tag.id}
-              className="inline-flex max-w-40 items-center gap-1 rounded-md border border-border/70 bg-muted/50 px-2 py-0.5 text-xs text-muted-foreground"
-            >
-              <Tag className="h-3 w-3 shrink-0" aria-hidden="true" />
-              <span className="truncate">{tag.name}</span>
-              <button
-                type="button"
-                aria-label={`移除标签 ${tag.name}`}
-                onClick={() => removeArticleTag(article.id, tag)}
-                className="rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          {(article.tags ?? []).map((tag) => {
+            const colorClasses = getTagColorClasses(tag.color);
+
+            return (
+              <span
+                key={tag.id}
+                className={cn(
+                  "inline-flex max-w-40 items-center gap-1 rounded-md border px-2 py-0.5 text-xs",
+                  colorClasses.badge,
+                )}
               >
-                <X className="h-3 w-3" aria-hidden="true" />
-              </button>
-            </span>
-          ))}
+                <Tag
+                  className={cn("h-3 w-3 shrink-0", colorClasses.icon)}
+                  aria-hidden="true"
+                />
+                <span className="truncate">{tag.name}</span>
+                <button
+                  type="button"
+                  aria-label={`移除标签 ${tag.name}`}
+                  onClick={() => removeArticleTag(article.id, tag)}
+                  className="rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  <X className="h-3 w-3" aria-hidden="true" />
+                </button>
+              </span>
+            );
+          })}
           <div className="flex items-center gap-1">
             <input
               aria-label="添加标签"
