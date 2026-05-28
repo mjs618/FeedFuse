@@ -118,6 +118,16 @@ docker compose up -d
 
 改成具体版本号，例如 `0.0.3`。
 
+## 可选外联代理
+
+如果服务器需要通过 SOCKS 代理访问 RSS、全文、图片或 AI 服务，可以在 `.env` 中设置：
+
+```env
+FEEDFUSE_OUTBOUND_PROXY=socks5h://host.docker.internal:1080
+```
+
+该变量可留空。当前仅支持 `socks://`、`socks4://`、`socks4a://`、`socks5://`、`socks5h://`。发布用 `compose.yaml` 会把该变量传给 `web` 和 `worker`。
+
 ## 补充说明
 
 - 仓库根目录的 `docker-compose.yml` 主要用于从源码构建和调试，不是推荐的生产部署入口

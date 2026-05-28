@@ -30,6 +30,7 @@ services:
       # 首次未在设置页修改密码前，登录会使用该初始密码校验
       AUTH_INITIAL_PASSWORD: ${AUTH_INITIAL_PASSWORD}
       IMAGE_PROXY_SECRET: ${IMAGE_PROXY_SECRET}
+      FEEDFUSE_OUTBOUND_PROXY: ${FEEDFUSE_OUTBOUND_PROXY:-}
       PORT: '9559'
       HOSTNAME: '0.0.0.0'
     extra_hosts:
@@ -57,6 +58,7 @@ services:
       ]
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      FEEDFUSE_OUTBOUND_PROXY: ${FEEDFUSE_OUTBOUND_PROXY:-}
     extra_hosts:
       - 'host.docker.internal:host-gateway'
     depends_on:

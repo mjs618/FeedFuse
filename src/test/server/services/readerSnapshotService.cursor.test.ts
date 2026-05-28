@@ -3,6 +3,8 @@ import type { Pool } from 'pg';
 
 const listCategoriesMock = vi.fn();
 const listFeedsMock = vi.fn();
+const listTagsForArticlesMock = vi.fn();
+const listTagsWithVisibleArticleCountsMock = vi.fn();
 
 vi.mock('@/server/domains/feeds/repositories/categoriesRepo', () => ({
   listCategories: (...args: unknown[]) => listCategoriesMock(...args),
@@ -12,10 +14,20 @@ vi.mock('@/server/domains/feeds/repositories/feedsRepo', () => ({
   listFeeds: (...args: unknown[]) => listFeedsMock(...args),
 }));
 
+vi.mock('@/server/domains/articles/repositories/articleTagsRepo', () => ({
+  listTagsForArticles: (...args: unknown[]) => listTagsForArticlesMock(...args),
+  listTagsWithVisibleArticleCounts: (...args: unknown[]) =>
+    listTagsWithVisibleArticleCountsMock(...args),
+}));
+
 describe('readerSnapshotService (cursor)', () => {
   beforeEach(() => {
     listCategoriesMock.mockReset();
     listFeedsMock.mockReset();
+    listTagsForArticlesMock.mockReset();
+    listTagsWithVisibleArticleCountsMock.mockReset();
+    listTagsForArticlesMock.mockResolvedValue([]);
+    listTagsWithVisibleArticleCountsMock.mockResolvedValue([]);
   });
 
   it('qualifies article id in snapshot ordering when joining ai summary sessions', async () => {

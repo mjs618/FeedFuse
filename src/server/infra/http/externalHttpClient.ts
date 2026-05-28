@@ -1,13 +1,46 @@
 import got from 'got';
 import { Readable } from 'node:stream';
+import { SocksProxyAgent } from 'socks-proxy-agent';
 import { getPool } from '@/server/infra/db/pool';
 import { writeSystemLog } from '@/server/infra/logging/systemLogger';
 import { getFetchUrlCandidates } from '@/server/integrations/rss/fetchUrlCandidates';
 import { isSafeMediaUrl } from '@/server/integrations/media/mediaProxyGuard';
 
+const SOCKS_PROXY_PROTOCOLS = new Set(['socks:', 'socks4:', 'socks4a:', 'socks5:', 'socks5h:']);
+
+function parseOutboundProxyUrl(value: string | undefined): URL | undefined {
+  const proxyUrl = value?.trim();
+  if (!proxyUrl) return undefined;
+
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(proxyUrl);
+  } catch {
+    throw new Error('FEEDFUSE_OUTBOUND_PROXY must be a valid SOCKS proxy URL');
+  }
+
+  if (!SOCKS_PROXY_PROTOCOLS.has(parsedUrl.protocol)) {
+    throw new Error('FEEDFUSE_OUTBOUND_PROXY must be a SOCKS proxy URL');
+  }
+
+  return parsedUrl;
+}
+
+function getProxyAgent() {
+  const proxyUrl = parseOutboundProxyUrl(process.env.FEEDFUSE_OUTBOUND_PROXY);
+  if (!proxyUrl) return undefined;
+
+  const agent = new SocksProxyAgent(proxyUrl);
+  return {
+    http: agent,
+    https: agent,
+  };
+}
+
 const client = got.extend({
   retry: { limit: 0 },
   throwHttpErrors: false,
+  agent: getProxyAgent(),
 });
 
 export interface FetchRssXmlResult {

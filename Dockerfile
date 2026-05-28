@@ -1,14 +1,15 @@
-# syntax=docker/dockerfile:1.7
-
-FROM node:24-alpine AS base
+FROM node:20-alpine AS base
 WORKDIR /app
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
-RUN corepack enable
+RUN corepack enable && corepack prepare pnpm@10.30.3 --activate
+RUN pnpm config set fetch-retries 5 \
+  && pnpm config set fetch-retry-mintimeout 10000 \
+  && pnpm config set fetch-retry-maxtimeout 120000
 
 FROM base AS deps
 COPY package.json pnpm-lock.yaml ./
-RUN --mount=type=cache,target=/pnpm/store pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile
 
 FROM deps AS builder
 COPY . .
@@ -16,9 +17,9 @@ RUN pnpm run build
 
 FROM base AS prod-deps
 COPY package.json pnpm-lock.yaml ./
-RUN --mount=type=cache,target=/pnpm/store pnpm install --prod --frozen-lockfile
+RUN pnpm install --prod --frozen-lockfile
 
-FROM node:24-alpine AS runtime
+FROM node:20-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 RUN addgroup -S appgroup -g 1001 && adduser -S appuser -u 1001 -G appgroup
