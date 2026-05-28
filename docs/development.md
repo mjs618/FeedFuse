@@ -92,3 +92,13 @@ docker compose up --build
 ```
 
 这个入口会从当前源码构建 `web` 和 `worker` 镜像，适合本地验证镜像行为，不适合作为推荐部署方式。
+
+## 可选外联代理
+
+如果本地环境需要通过 SOCKS 代理访问 RSS、全文、图片或 AI 服务，可以在 `.env` 中设置：
+
+```env
+FEEDFUSE_OUTBOUND_PROXY=socks5h://127.0.0.1:1080
+```
+
+该变量可留空。当前仅支持 `socks://`、`socks4://`、`socks4a://`、`socks5://`、`socks5h://`。

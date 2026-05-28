@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createServer } from 'node:http';
+import { createServer as createHttpServer } from 'node:http';
+import { createConnection, createServer as createNetServer } from 'node:net';
 import type { AddressInfo } from 'node:net';
 
 const pool = {};
@@ -18,9 +19,10 @@ describe('externalHttpClient', () => {
   let baseUrl = '';
 
   beforeEach(async () => {
+    vi.resetModules();
     writeSystemLogMock.mockReset();
 
-    const server = createServer((req, res) => {
+    const server = createHttpServer((req, res) => {
       if (req.url === '/rss.xml') {
         res.statusCode = 200;
         res.setHeader('content-type', 'application/rss+xml; charset=utf-8');
@@ -55,6 +57,7 @@ describe('externalHttpClient', () => {
 
   afterEach(async () => {
     await closeServer?.();
+    vi.unstubAllEnvs();
   });
 
   it('fetchRssXml returns status/xml/etag/lastModified and logs success metadata', async () => {
@@ -135,6 +138,95 @@ describe('externalHttpClient', () => {
           durationMs: expect.any(Number),
         }),
       }),
+    );
+  });
+
+  it('routes RSS requests through FEEDFUSE_OUTBOUND_PROXY when configured', async () => {
+    const proxyRequests: string[] = [];
+    const proxyServer = createNetServer((clientSocket) => {
+      clientSocket.once('data', (greeting) => {
+        expect([...greeting]).toEqual([0x05, 0x01, 0x00]);
+        clientSocket.write(Buffer.from([0x05, 0x00]));
+
+        clientSocket.once('data', (request) => {
+          expect(request[0]).toBe(0x05);
+          expect(request[1]).toBe(0x01);
+          const addressType = request[3];
+          let offset = 4;
+          let host = '';
+          if (addressType === 0x01) {
+            host = [...request.subarray(offset, offset + 4)].join('.');
+            offset += 4;
+          } else if (addressType === 0x03) {
+            const length = request[offset];
+            offset += 1;
+            host = request.subarray(offset, offset + length).toString('utf8');
+            offset += length;
+          }
+          const port = request.readUInt16BE(offset);
+          proxyRequests.push(`${host}:${port}`);
+
+          const upstream = createConnection(port, host);
+          upstream.once('connect', () => {
+            clientSocket.write(Buffer.from([0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
+            clientSocket.pipe(upstream);
+            upstream.pipe(clientSocket);
+          });
+          upstream.once('error', () => {
+            clientSocket.write(Buffer.from([0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
+            clientSocket.destroy();
+          });
+        });
+      });
+    });
+
+    await new Promise<void>((resolve) => proxyServer.listen(0, '127.0.0.1', resolve));
+    const { port } = proxyServer.address() as AddressInfo;
+    vi.stubEnv('FEEDFUSE_OUTBOUND_PROXY', `socks5://127.0.0.1:${port}`);
+
+    try {
+      const { fetchRssXml } = await import('@/server/infra/http/externalHttpClient');
+      const res = await fetchRssXml(`${baseUrl}/rss.xml`, {
+        timeoutMs: 1000,
+        userAgent: 'test-agent',
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.xml).toContain('<rss');
+      expect(proxyRequests).toEqual([new URL(baseUrl).host]);
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        proxyServer.close((err) => (err ? reject(err) : resolve())),
+      );
+    }
+  });
+
+  it('ignores blank FEEDFUSE_OUTBOUND_PROXY values', async () => {
+    vi.stubEnv('FEEDFUSE_OUTBOUND_PROXY', '   ');
+
+    const { fetchRssXml } = await import('@/server/infra/http/externalHttpClient');
+    const res = await fetchRssXml(`${baseUrl}/rss.xml`, {
+      timeoutMs: 1000,
+      userAgent: 'test-agent',
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.xml).toContain('<rss');
+  });
+
+  it('rejects invalid FEEDFUSE_OUTBOUND_PROXY values with a stable error', async () => {
+    vi.stubEnv('FEEDFUSE_OUTBOUND_PROXY', 'not a url');
+
+    await expect(import('@/server/infra/http/externalHttpClient')).rejects.toThrow(
+      'FEEDFUSE_OUTBOUND_PROXY must be a valid SOCKS proxy URL',
+    );
+  });
+
+  it('rejects non-SOCKS FEEDFUSE_OUTBOUND_PROXY protocols', async () => {
+    vi.stubEnv('FEEDFUSE_OUTBOUND_PROXY', 'http://127.0.0.1:1080');
+
+    await expect(import('@/server/infra/http/externalHttpClient')).rejects.toThrow(
+      'FEEDFUSE_OUTBOUND_PROXY must be a SOCKS proxy URL',
     );
   });
 });
