@@ -35,6 +35,16 @@ describe('mediaProxyGuard', () => {
     await expect(isSafeMediaUrl('https://public.example/image.jpg')).resolves.toBe(true);
   });
 
+  it('accepts public hostnames resolving to proxy placeholder addresses', async () => {
+    lookupMock.mockResolvedValue([{ address: '198.18.4.80', family: 4 }]);
+
+    await expect(isSafeMediaUrl('https://img.example.com/image.jpg')).resolves.toBe(true);
+  });
+
+  it('keeps rejecting direct proxy placeholder ip urls', async () => {
+    await expect(isSafeMediaUrl('https://198.18.4.80/image.jpg')).resolves.toBe(false);
+  });
+
   it('rejects credentialed urls', async () => {
     await expect(isSafeMediaUrl('https://user:pass@example.com/image.jpg')).resolves.toBe(false);
   });
